@@ -672,3 +672,14 @@ body {
   border: 1px solid rgba(239, 68, 68, .3);
 }
 .cv-btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, .2); }
+
+/* ── Campo de PIN (grande, centralizado) ─────────────────── */
+.cv-input-pin {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 14px;
+  padding-left: 14px; /* compensa o letter-spacing do último dígito */
+}
+.cv-input-pin::placeholder { letter-spacing: 10px; font-size: 22px; }

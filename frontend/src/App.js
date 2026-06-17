@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Vault from './crypto';
+import DeviceLock from './deviceLock';
 import './App.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -17,6 +18,8 @@ const Icon = {
   Shield:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
   Check:   () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,
   Refresh: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>,
+  Finger:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 11v4M8.5 9.5a4 4 0 017 2.5 9 9 0 01-1 4M6 13a8 8 0 01-.6-3 6.6 6.6 0 0111-4.9M9.2 18.3A6 6 0 0010 16"/></svg>,
+  Phone:   () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>,
 };
 
 function Spinner() {
@@ -45,11 +48,25 @@ export default function App() {
   const [showSeed, setShowSeed] = useState(false);
   const [copied, setCopied]   = useState(false);
 
+  // ── Desbloqueio rápido (PIN / biometria por aparelho) ────
+  const [bioAvailable, setBioAvailable] = useState(false);
+  const [unlockF, setUnlockF]   = useState({ pin: '' });
+  const [pinSetup, setPinSetup] = useState({ pin: '', confirm: '', useBio: false });
+  const [gateSeed, setGateSeed] = useState(null); // seed aguardando trava p/ revelar
+  const [gatePin, setGatePin]   = useState('');
+
   // ── Carrega seeds ao entrar no dashboard ─────────────────
   useEffect(() => {
     if (view === 'dashboard' && auth && dek) loadSeeds();
     // eslint-disable-next-line
   }, [view, auth, dek]);
+
+  // ── Ao abrir o app: se este aparelho já tem desbloqueio rápido, vai pra tela de unlock ──
+  useEffect(() => {
+    DeviceLock.biometricAvailable().then(setBioAvailable).catch(() => {});
+    if (DeviceLock.isEnabled() && !auth) setView('unlock');
+    // eslint-disable-next-line
+  }, []);
 
   // ── Helpers ──────────────────────────────────────────────
   function clearMsgs() { setError(''); setSuccess(''); }
@@ -225,6 +242,126 @@ export default function App() {
       setModal(null);
       showSuccess('Seed removida');
       loadSeeds();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Desbloqueio rápido: abrir o cofre por PIN / biometria ──
+  async function openVaultWith(dekBytes, refreshToken) {
+    const data = await apiFetch('/api/auth/device/refresh', { method: 'POST', body: JSON.stringify({ refreshToken }) });
+    setAuth({ token: data.token, email: data.email });
+    setDek(dekBytes);
+    setUnlockF({ pin: '' });
+    setView('dashboard');
+  }
+
+  async function handleUnlockPin(e) {
+    e.preventDefault();
+    clearMsgs();
+    if (unlockF.pin.length < 4) return setError('Digite seu PIN');
+    setLoading(true);
+    try {
+      const r = await DeviceLock.unlockPin(unlockF.pin);
+      await openVaultWith(r.dek, r.refreshToken);
+    } catch (err) {
+      setError(err.message);
+      if (!DeviceLock.isEnabled()) { setUnlockF({ pin: '' }); goTo('login'); } // foi auto-apagado
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleUnlockBio() {
+    clearMsgs();
+    setLoading(true);
+    try {
+      const r = await DeviceLock.unlockBiometric();
+      await openVaultWith(r.dek, r.refreshToken);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Ativar desbloqueio rápido neste aparelho ──
+  async function handleEnableDeviceLock(e) {
+    e.preventDefault();
+    clearMsgs();
+    if (!/^\d{6}$/.test(pinSetup.pin)) return setError('O PIN deve ter 6 dígitos');
+    if (pinSetup.pin !== pinSetup.confirm) return setError('Os PINs não coincidem');
+    setLoading(true);
+    try {
+      const { refreshToken } = await apiFetch('/api/auth/device/enroll', {
+        method: 'POST',
+        body: JSON.stringify({ label: navigator.userAgent.slice(0, 60) }),
+      });
+      await DeviceLock.enrollPin({ email: auth.email, pin: pinSetup.pin, dek, refreshToken });
+      let extra = '';
+      if (pinSetup.useBio) {
+        try { await DeviceLock.enrollBiometric({ email: auth.email, dek, refreshToken }); }
+        catch { extra = ' (biometria não pôde ser ativada aqui — PIN funcionando)'; }
+      }
+      setModal(null);
+      setPinSetup({ pin: '', confirm: '', useBio: false });
+      showSuccess('🔒 Desbloqueio rápido ativado neste aparelho' + extra);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleForgetDevice() {
+    if (!window.confirm('Desativar o desbloqueio rápido neste aparelho? No próximo acesso será necessário senha + 2FA.')) return;
+    setLoading(true);
+    try {
+      await apiFetch('/api/auth/device/revoke', { method: 'POST' });
+      DeviceLock.forget();
+      setModal(null);
+      showSuccess('Desbloqueio rápido desativado neste aparelho');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Trava por seed: revelar exige PIN/biometria (quando ativado) ──
+  function requestReveal(seed) {
+    clearMsgs();
+    if (DeviceLock.isEnabled()) { setGateSeed(seed); setGatePin(''); }
+    else { setModal({ type: 'view', seed }); setShowSeed(false); setCopied(false); }
+  }
+
+  async function handleGatePin(e) {
+    e.preventDefault();
+    clearMsgs();
+    setLoading(true);
+    try {
+      await DeviceLock.verifyPin(gatePin, dek);
+      const seed = gateSeed;
+      setGateSeed(null); setGatePin('');
+      setModal({ type: 'view', seed }); setShowSeed(true); setCopied(false);
+    } catch (err) {
+      setError(err.message);
+      if (!DeviceLock.isEnabled()) { setGateSeed(null); handleLogout(); }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleGateBio() {
+    clearMsgs();
+    setLoading(true);
+    try {
+      if (!(await DeviceLock.verifyBiometric(dek))) throw new Error('Biometria não confere');
+      const seed = gateSeed;
+      setGateSeed(null);
+      setModal({ type: 'view', seed }); setShowSeed(true); setCopied(false);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -460,6 +597,49 @@ export default function App() {
   }
 
   // ════════════════════════════════════════════════════════
+  // TELA: DESBLOQUEIO RÁPIDO (PIN / biometria)
+  // ════════════════════════════════════════════════════════
+  if (view === 'unlock') {
+    return (
+      <div className="cv-bg">
+        <div className="cv-card cv-card-auth">
+          <div className="cv-brand">
+            <div className="cv-brand-icon"><Icon.Lock /></div>
+            <h1 className="cv-brand-name">Desbloquear</h1>
+            <p className="cv-brand-sub">{DeviceLock.enabledEmail()}</p>
+          </div>
+
+          <form onSubmit={handleUnlockPin} className="cv-form" noValidate>
+            <Field label="PIN">
+              <input
+                type="password" inputMode="numeric" autoComplete="off" autoFocus
+                className="cv-input-pin" placeholder="••••••" maxLength={6}
+                value={unlockF.pin}
+                onChange={e => setUnlockF({ pin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+              />
+            </Field>
+
+            {error   && <Alert type="error">{error}</Alert>}
+            {success && <Alert type="success">{success}</Alert>}
+
+            <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+              {loading ? <Spinner /> : <><Icon.Lock /> Desbloquear</>}
+            </button>
+          </form>
+
+          {DeviceLock.hasBiometric() && (
+            <button onClick={handleUnlockBio} className="cv-btn cv-btn-ghost" disabled={loading}>
+              <Icon.Finger /> Usar biometria
+            </button>
+          )}
+
+          <button onClick={() => goTo('login')} className="cv-link-btn">Entrar com senha completa</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
   // TELA: DASHBOARD
   // ════════════════════════════════════════════════════════
   if (view === 'dashboard' && auth) {
@@ -472,6 +652,7 @@ export default function App() {
           </div>
           <div className="cv-header-right">
             <span className="cv-header-email">{auth.email}</span>
+            <button onClick={() => { setModal({ type: 'devicelock' }); clearMsgs(); }} className="cv-btn-icon" title="Desbloqueio rápido (PIN/biometria)"><Icon.Phone /></button>
             <button onClick={() => loadSeeds()} className="cv-btn-icon" title="Recarregar" disabled={loading}><Icon.Refresh /></button>
             <button onClick={handleLogout} className="cv-btn-icon cv-btn-icon--logout" title="Sair"><Icon.LogOut /></button>
           </div>
@@ -523,7 +704,7 @@ export default function App() {
                   <div className="cv-sc-footer">
                     <span className="cv-badge-chain">🔒 AES-256-GCM</span>
                     <button
-                      onClick={() => { setModal({ type: 'view', seed }); setShowSeed(false); setCopied(false); }}
+                      onClick={() => requestReveal(seed)}
                       className="cv-btn-view" disabled={seed.broken}
                     >
                       <Icon.Eye /> Ver seed
@@ -612,6 +793,85 @@ export default function App() {
                 {showSeed ? <><Icon.EyeOff /> Ocultar</> : <><Icon.Eye /> Revelar Seed</>}
               </button>
             </div>
+          </Modal>
+        )}
+
+        {/* ── Trava por seed: PIN/biometria para revelar ── */}
+        {gateSeed && (
+          <Modal onClose={() => { setGateSeed(null); setGatePin(''); clearMsgs(); }}>
+            <div className="cv-modal-header">
+              <h3><Icon.Lock /> Revelar “{gateSeed.title}”</h3>
+              <p className="cv-modal-date">Confirme com seu PIN{DeviceLock.hasBiometric() ? ' ou biometria' : ''}</p>
+            </div>
+            <form onSubmit={handleGatePin}>
+              <Field label="PIN">
+                <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••••" maxLength={6}
+                  value={gatePin}
+                  onChange={e => setGatePin(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+              </Field>
+              {error && <Alert type="error">{error}</Alert>}
+              <div className="cv-modal-actions">
+                {DeviceLock.hasBiometric() && (
+                  <button type="button" onClick={handleGateBio} className="cv-btn cv-btn-ghost" disabled={loading}><Icon.Finger /> Biometria</button>
+                )}
+                <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                  {loading ? <Spinner /> : <><Icon.Eye /> Revelar</>}
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
+        {/* ── Configurar desbloqueio rápido ── */}
+        {modal?.type === 'devicelock' && (
+          <Modal onClose={() => { setModal(null); setPinSetup({ pin: '', confirm: '', useBio: false }); clearMsgs(); }}>
+            <div className="cv-modal-header">
+              <h3><Icon.Phone /> Desbloqueio rápido</h3>
+              <p className="cv-modal-date">Abrir o cofre neste aparelho com PIN ou biometria</p>
+            </div>
+
+            {DeviceLock.isEnabled() ? (
+              <>
+                <Alert type="success">✅ Ativo neste aparelho{DeviceLock.hasBiometric() ? ' (com biometria)' : ''}.</Alert>
+                <p className="cv-hint" style={{ marginBottom: 16 }}>
+                  As próximas aberturas pedem só o PIN/biometria. A proteção total continua sendo senha + 2FA.
+                </p>
+                <div className="cv-modal-actions">
+                  <button onClick={handleForgetDevice} className="cv-btn cv-btn-danger" disabled={loading}>
+                    {loading ? <Spinner /> : 'Desativar neste aparelho'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={handleEnableDeviceLock}>
+                <Alert type="warning">
+                  ⚠️ Guarda uma cópia <strong>cifrada</strong> da chave neste aparelho, protegida pelo PIN. Conveniência com algum risco — ative só em aparelhos seus. Após 5 PINs errados, apaga sozinho.
+                </Alert>
+                <Field label="Criar PIN (6 dígitos)">
+                  <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••••" maxLength={6}
+                    value={pinSetup.pin}
+                    onChange={e => setPinSetup(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))} />
+                </Field>
+                <Field label="Confirmar PIN">
+                  <input type="password" inputMode="numeric" className="cv-input-pin" placeholder="••••••" maxLength={6}
+                    value={pinSetup.confirm}
+                    onChange={e => setPinSetup(p => ({ ...p, confirm: e.target.value.replace(/\D/g, '').slice(0, 6) }))} />
+                </Field>
+                {bioAvailable && (
+                  <label className="cv-checkbox">
+                    <input type="checkbox" checked={pinSetup.useBio} onChange={e => setPinSetup(p => ({ ...p, useBio: e.target.checked }))} />
+                    <span>Também usar biometria (Face ID / digital) neste aparelho</span>
+                  </label>
+                )}
+                {error && <Alert type="error">{error}</Alert>}
+                <div className="cv-modal-actions">
+                  <button type="button" onClick={() => { setModal(null); setPinSetup({ pin: '', confirm: '', useBio: false }); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancelar</button>
+                  <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                    {loading ? <Spinner /> : <><Icon.Lock /> Ativar</>}
+                  </button>
+                </div>
+              </form>
+            )}
           </Modal>
         )}
       </div>

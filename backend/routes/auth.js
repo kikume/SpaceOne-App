@@ -1,10 +1,14 @@
-const router    = require('express').Router();
-const bcrypt    = require('bcryptjs');
-const jwt       = require('jsonwebtoken');
-const speakeasy = require('speakeasy');
-const QRCode    = require('qrcode');
-const { pool }  = require('../db');
+const router      = require('express').Router();
+const crypto      = require('crypto');
+const bcrypt      = require('bcryptjs');
+const jwt         = require('jsonwebtoken');
+const speakeasy   = require('speakeasy');
+const QRCode      = require('qrcode');
+const { pool }    = require('../db');
+const requireAuth = require('../middleware/auth');
 const { encryptAtRest, decryptAtRest, decoySalt } = require('../utils/serverCrypto');
+
+const sha256hex = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 const EMAIL_RE  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const HEX64_RE  = /^[0-9a-f]{64}$/i; // authKeys derivadas (256 bits em hex)
@@ -163,6 +167,61 @@ router.post('/recover/commit', async (req, res) => {
   } catch (err) {
     console.error('recover/commit:', err);
     res.status(500).json({ error: 'Erro ao redefinir senha' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+//  DESBLOQUEIO RÁPIDO — refresh token por dispositivo
+//  Mesmo que o refresh token vaze, sem a DEK (presa no PIN/biometria
+//  do aparelho) o atacante só consegue ler blobs cifrados.
+// ════════════════════════════════════════════════════════════
+
+// POST /device/enroll — exige login completo; emite um refresh token
+router.post('/device/enroll', requireAuth, async (req, res) => {
+  try {
+    const raw   = crypto.randomBytes(32).toString('hex');
+    const label = (req.body && req.body.label) ? String(req.body.label).slice(0, 100) : 'Dispositivo';
+    await pool.query(
+      'INSERT INTO device_tokens (user_id, token_hash, label) VALUES ($1, $2, $3)',
+      [req.user.userId, sha256hex(raw), label]
+    );
+    res.status(201).json({ refreshToken: raw });
+  } catch (err) {
+    console.error('device/enroll:', err);
+    res.status(500).json({ error: 'Erro ao registrar dispositivo' });
+  }
+});
+
+// POST /device/refresh — troca o refresh token por um access token novo
+router.post('/device/refresh', async (req, res) => {
+  const { refreshToken } = req.body || {};
+  if (!refreshToken) return res.status(400).json({ error: 'Token ausente' });
+  try {
+    const r = await pool.query(
+      `SELECT dt.id, dt.user_id, u.email
+         FROM device_tokens dt JOIN users u ON u.id = dt.user_id
+        WHERE dt.token_hash = $1 AND dt.created_at > NOW() - INTERVAL '30 days'`,
+      [sha256hex(refreshToken)]
+    );
+    if (r.rows.length === 0) return res.status(401).json({ error: 'Sessão do dispositivo inválida ou expirada' });
+    const row = r.rows[0];
+    await pool.query('UPDATE device_tokens SET last_used_at = NOW() WHERE id = $1', [row.id]);
+    const token = jwt.sign({ userId: row.user_id, email: row.email, purpose: 'access' }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, email: row.email });
+  } catch (err) {
+    console.error('device/refresh:', err);
+    res.status(500).json({ error: 'Erro ao renovar sessão' });
+  }
+});
+
+// POST /device/revoke — desvincula todos os dispositivos do usuário
+router.post('/device/revoke', requireAuth, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM device_tokens WHERE user_id = $1', [req.user.userId]);
+    res.json({ message: 'Dispositivos desvinculados' });
+  } catch (err) {
+    console.error('device/revoke:', err);
+    res.status(500).json({ error: 'Erro ao desvincular dispositivos' });
   }
 });
 

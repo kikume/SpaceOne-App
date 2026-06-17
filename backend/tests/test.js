@@ -106,6 +106,43 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
     assert(data.seeds.length === 0, 'deveria estar vazio');
   });
 
+  // ── Desbloqueio rápido (refresh token por dispositivo) ──
+  let deviceRefresh, refreshedToken;
+  await test('device/enroll (autenticado) devolve refresh token', async () => {
+    const { status, data } = await api('/api/auth/device/enroll', { method: 'POST', body: { label: 'Teste' }, token });
+    assert(status === 201, `status ${status} ${data.error || ''}`);
+    assert(data.refreshToken && data.refreshToken.length >= 32, 'sem refresh token');
+    deviceRefresh = data.refreshToken;
+  });
+
+  await test('device/enroll SEM auth → 401', async () => {
+    const { status } = await api('/api/auth/device/enroll', { method: 'POST', body: {} });
+    assert(status === 401, `veio ${status}`);
+  });
+
+  await test('device/refresh troca refresh por access token novo', async () => {
+    const { status, data } = await api('/api/auth/device/refresh', { method: 'POST', body: { refreshToken: deviceRefresh } });
+    assert(status === 200 && data.token, `status ${status}`);
+    refreshedToken = data.token;
+  });
+
+  await test('access token vindo do refresh funciona em /seeds', async () => {
+    const { status } = await api('/api/seeds', { token: refreshedToken });
+    assert(status === 200, `veio ${status}`);
+  });
+
+  await test('device/refresh com token inválido → 401', async () => {
+    const { status } = await api('/api/auth/device/refresh', { method: 'POST', body: { refreshToken: 'invalido123' } });
+    assert(status === 401, `veio ${status}`);
+  });
+
+  await test('device/revoke invalida o refresh token', async () => {
+    const { status: rs } = await api('/api/auth/device/revoke', { method: 'POST', token });
+    assert(rs === 200, `revoke ${rs}`);
+    const { status } = await api('/api/auth/device/refresh', { method: 'POST', body: { refreshToken: deviceRefresh } });
+    assert(status === 401, `após revoke deveria ser 401, veio ${status}`);
+  });
+
   await test('RECUPERAÇÃO pelo código → redefine senha → login novo', async () => {
     const { data: rp } = await api(`/api/auth/recovery-params?email=${encodeURIComponent(email)}`);
     const r = await Vault.deriveRecovery(reg.recoveryCode, rp.kdfSaltRc);

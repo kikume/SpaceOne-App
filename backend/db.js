@@ -35,7 +35,20 @@ async function initDB() {
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_seeds_user ON seeds(user_id)`);
-    console.log('✅ Banco inicializado (users + seeds)');
+
+    // Refresh tokens por dispositivo (desbloqueio rápido). Guardamos só o HASH.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS device_tokens (
+        id           SERIAL PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash   VARCHAR(64) NOT NULL UNIQUE,
+        label        VARCHAR(100),
+        created_at   TIMESTAMPTZ DEFAULT NOW(),
+        last_used_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id)`);
+    console.log('✅ Banco inicializado (users + seeds + device_tokens)');
   } finally {
     client.release();
   }
