@@ -27,6 +27,10 @@ router.post('/', async (req, res) => {
   if (!blob || typeof blob !== 'string') return res.status(400).json({ error: 'Blob ausente' });
   if (blob.length > 8192)               return res.status(400).json({ error: 'Blob muito grande' });
   try {
+    const u = await pool.query('SELECT paid FROM users WHERE id = $1', [req.user.userId]);
+    if (!u.rows[0] || !u.rows[0].paid) {
+      return res.status(402).json({ error: 'Pagamento necessário para salvar seeds', code: 'PAYMENT_REQUIRED' });
+    }
     const r = await pool.query(
       `INSERT INTO seeds (user_id, blob) VALUES ($1, $2)
        RETURNING id, (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS timestamp`,

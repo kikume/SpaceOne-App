@@ -48,7 +48,20 @@ async function initDB() {
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id)`);
-    console.log('✅ Banco inicializado (users + seeds + device_tokens)');
+
+    // Acesso vitalício pago (pagamento único em cripto)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS paid BOOLEAN NOT NULL DEFAULT FALSE`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id         SERIAL PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        signature  VARCHAR(128) UNIQUE NOT NULL,   -- tx Solana (impede reuso)
+        coin       VARCHAR(8) NOT NULL,
+        amount_usd NUMERIC(10,2),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Banco inicializado (users + seeds + device_tokens + payments)');
   } finally {
     client.release();
   }

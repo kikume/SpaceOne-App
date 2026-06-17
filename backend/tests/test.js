@@ -5,6 +5,7 @@
 if (!globalThis.crypto) globalThis.crypto = require('crypto').webcrypto;
 const speakeasy = require('speakeasy');
 const Vault     = require('../../frontend/src/crypto.js');
+const { pool }  = require('../db');
 
 const BASE     = process.env.TEST_API_URL || 'http://localhost:3001';
 const email    = `t_${Date.now()}@cryptovault.test`;
@@ -82,6 +83,22 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
   await test('GET /seeds sem token → 401', async () => {
     const { status } = await api('/api/seeds');
     assert(status === 401, `veio ${status}`);
+  });
+
+  await test('salvar seed SEM pagar → 402 (gate de pagamento)', async () => {
+    const blob = await Vault.encryptSeed(dek, 'x', 'y z w');
+    const { status, data } = await api('/api/seeds', { method: 'POST', body: { blob }, token });
+    assert(status === 402, `esperava 402, veio ${status}`);
+    assert(data.code === 'PAYMENT_REQUIRED', 'faltou code PAYMENT_REQUIRED');
+  });
+
+  await test('payment/status + liberação (simulada via DB, sem pagar de verdade)', async () => {
+    const s = await api('/api/payment/status', { token });
+    assert(s.status === 200 && s.data.paid === false, 'status inicial deveria ser não-pago');
+    assert(s.data.address && s.data.priceUsd === 2, 'status deveria trazer address + priceUsd');
+    await pool.query('UPDATE users SET paid = TRUE WHERE email = $1', [email]);
+    const s2 = await api('/api/payment/status', { token });
+    assert(s2.data.paid === true, 'após liberar, status deveria ser pago');
   });
 
   await test('salvar seed (cifrada no cliente, blob não vaza)', async () => {
@@ -163,5 +180,6 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
   });
 
   console.log(`\n${'='.repeat(40)}\n  ✅ Passaram: ${pass}    ❌ Falharam: ${fail}\n${'='.repeat(40)}\n`);
+  await pool.end().catch(() => {});
   process.exit(fail > 0 ? 1 : 0);
 })().catch(e => { console.error('FATAL:', e); process.exit(1); });

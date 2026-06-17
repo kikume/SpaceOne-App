@@ -683,3 +683,8 @@ body {
   padding-left: 14px; /* compensa o letter-spacing do último dígito */
 }
 .cv-input-pin::placeholder { letter-spacing: 10px; font-size: 22px; }
+
+/* ── Paywall: lista de benefícios ────────────────────────── */
+.cv-pay-features { margin: 4px 0 18px; display: flex; flex-direction: column; gap: 10px; }
+.cv-pay-features p { font-size: 14px; color: var(--text-2); line-height: 1.5; }
+.cv-pay-features strong { color: var(--text); }

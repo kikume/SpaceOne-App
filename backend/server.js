@@ -5,8 +5,9 @@ const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { initDB } = require('./db');
 
-const authRoutes  = require('./routes/auth');
-const seedsRoutes = require('./routes/seeds');
+const authRoutes    = require('./routes/auth');
+const seedsRoutes   = require('./routes/seeds');
+const paymentRoutes = require('./routes/payment');
 
 const app = express();
 
@@ -27,8 +28,9 @@ const isProd = process.env.NODE_ENV === 'production';
 const authLimiter    = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 60  : 5000, message: { error: 'Muitas tentativas. Aguarde 15 minutos.' } });
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 300 : 5000, message: { error: 'Muitas requisições. Aguarde um momento.' } });
 
-app.use('/api/auth',  authLimiter,    authRoutes);
-app.use('/api/seeds', generalLimiter, seedsRoutes);
+app.use('/api/auth',    authLimiter,    authRoutes);
+app.use('/api/seeds',   generalLimiter, seedsRoutes);
+app.use('/api/payment', generalLimiter, paymentRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'CryptoVault API', model: 'zero-knowledge', timestamp: new Date().toISOString() });

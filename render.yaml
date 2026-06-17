@@ -24,6 +24,13 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Pagamento Solana (endereço público que recebe + RPC)
+      - key: SOLANA_PAY_ADDRESS
+        value: EPsQUSysoDn9FGyUvCDvypn2hSkCPERzszYeUyHyqaAs
+      - key: SOLANA_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: PRICE_USD
+        value: "2"
       - key: DATABASE_URL
         fromDatabase:
           name: cryptovault-db

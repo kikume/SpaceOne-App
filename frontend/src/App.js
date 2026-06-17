@@ -56,6 +56,10 @@ export default function App() {
   const [gateSeed, setGateSeed] = useState(null); // seed aguardando trava p/ revelar
   const [gatePin, setGatePin]   = useState('');
 
+  // ── Pagamento (acesso vitalício) ─────────────────────────
+  const [payInfo, setPayInfo]   = useState(null); // { address, priceUsd, coins }
+  const [payF, setPayF]         = useState({ signature: '' });
+
   // ── Carrega seeds ao entrar no dashboard ─────────────────
   useEffect(() => {
     if (view === 'dashboard' && auth && dek) loadSeeds();
@@ -148,10 +152,8 @@ export default function App() {
       try { dekBytes = await Vault.unwrapDek(derived.kek, data.wrappedDekPw); }
       catch { throw new Error('Falha ao abrir o cofre. Tente novamente.'); }
 
-      setAuth({ token: data.token, email: data.email });
-      setDek(dekBytes);
-      setLoginF({ email: '', password: '', totpCode: '' });
-      setView('dashboard');
+      setLoginF({ email: '', password: '', secretKey: '', totpCode: '' });
+      await gotoVault(data.token, data.email, dekBytes);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -183,7 +185,7 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify({ recoveryToken: v.recoveryToken, newAuthKey: reset.authKey, newKdfSalt: reset.kdfSalt, newWrappedDekPw: reset.wrappedDekPw }),
       });
-      setRecF({ email: '', recoveryCode: '', newPassword: '', confirm: '' });
+      setRecF({ email: '', recoveryCode: '', secretKey: '', newPassword: '', confirm: '' });
       goTo('login');
       showSuccess('✅ Senha redefinida! Entre com a nova senha.');
     } catch (err) {
@@ -253,10 +255,39 @@ export default function App() {
   // ── Desbloqueio rápido: abrir o cofre por PIN / biometria ──
   async function openVaultWith(dekBytes, refreshToken) {
     const data = await apiFetch('/api/auth/device/refresh', { method: 'POST', body: JSON.stringify({ refreshToken }) });
-    setAuth({ token: data.token, email: data.email });
-    setDek(dekBytes);
     setUnlockF({ pin: '' });
-    setView('dashboard');
+    await gotoVault(data.token, data.email, dekBytes);
+  }
+
+  // Após autenticar: checa pagamento → vai pro cofre OU pro paywall
+  async function gotoVault(token, email, dekBytes) {
+    let info = null, paid = false;
+    try {
+      const r = await fetch(`${API_URL}/api/payment/status`, { headers: { Authorization: `Bearer ${token}` } });
+      info = await r.json();
+      paid = !!info.paid;
+    } catch { /* offline: deixa entrar e o gate do backend protege */ paid = true; }
+    setAuth({ token, email });
+    setDek(dekBytes);
+    setPayInfo(info);
+    setView(paid ? 'dashboard' : 'paywall');
+  }
+
+  async function handleVerifyPayment(e) {
+    e.preventDefault();
+    clearMsgs();
+    if (!payF.signature.trim()) return setError('Cole a assinatura (signature) da sua transação');
+    setLoading(true);
+    try {
+      const d = await apiFetch('/api/payment/verify', { method: 'POST', body: JSON.stringify({ signature: payF.signature.trim() }) });
+      setPayF({ signature: '' });
+      showSuccess(d.message || 'Pagamento confirmado!');
+      setView('dashboard');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleUnlockPin(e) {
@@ -662,6 +693,53 @@ export default function App() {
           )}
 
           <button onClick={() => goTo('login')} className="cv-link-btn">Entrar com senha completa</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  // TELA: PAYWALL (pagamento único para liberar)
+  // ════════════════════════════════════════════════════════
+  if (view === 'paywall' && auth) {
+    const price = (payInfo && payInfo.priceUsd) || 2;
+    return (
+      <div className="cv-bg">
+        <div className="cv-card cv-card-wide">
+          <div className="cv-brand">
+            <div className="cv-brand-icon"><Icon.Shield /></div>
+            <h1 className="cv-brand-name">Acesso vitalício</h1>
+            <p className="cv-brand-sub">Pagamento único de ${price} em cripto — use para sempre</p>
+          </div>
+
+          <div className="cv-pay-features">
+            <p>🔒 <strong>Criptografia ponta a ponta</strong> — suas seeds são cifradas no seu aparelho. Nem nós conseguimos lê-las.</p>
+            <p>🛡️ <strong>Zero-knowledge</strong> — mesmo modelo do 1Password e Bitwarden.</p>
+            <p>🔑 <strong>Argon2id + Chave-Secreta + 2FA + biometria</strong>.</p>
+            <p>♾️ Pague <strong>uma vez</strong>, sem mensalidade.</p>
+          </div>
+
+          <div className="cv-recovery-box">
+            <div className="cv-recovery-head"><Icon.Key /> <strong>Pague ${price} em USDC ou SOL (rede Solana)</strong></div>
+            <p className="cv-hint" style={{ marginBottom: 8 }}>Envie de qualquer carteira Solana (Phantom, etc.) para:</p>
+            <code className="cv-recovery-code" onClick={() => copyText(payInfo && payInfo.address)}>{(payInfo && payInfo.address) || '...'}</code>
+            <small>Clique para copiar o endereço</small>
+          </div>
+
+          <form onSubmit={handleVerifyPayment} className="cv-form">
+            <Field label="Depois de pagar, cole a assinatura (signature) da transação">
+              <input type="text" required placeholder="signature da transação Solana" className="cv-input-mono"
+                value={payF.signature}
+                onChange={e => setPayF({ signature: e.target.value })} />
+            </Field>
+            {error   && <Alert type="error">{error}</Alert>}
+            {success && <Alert type="success">{success}</Alert>}
+            <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+              {loading ? <><Spinner /> Verificando na blockchain…</> : <><Icon.Check /> Já paguei — Liberar acesso</>}
+            </button>
+          </form>
+
+          <button onClick={handleLogout} className="cv-link-btn">Sair</button>
         </div>
       </div>
     );
