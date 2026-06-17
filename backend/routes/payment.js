@@ -1,6 +1,7 @@
 const router      = require('express').Router();
 const requireAuth = require('../middleware/auth');
 const { pool }    = require('../db');
+const QRCode      = require('qrcode');
 
 // Endereço que RECEBE os pagamentos (público — pode ficar no código/env)
 const PAY_ADDRESS = process.env.SOLANA_PAY_ADDRESS || 'EPsQUSysoDn9FGyUvCDvypn2hSkCPERzszYeUyHyqaAs';
@@ -10,6 +11,18 @@ const PRICE_USD   = Number(process.env.PRICE_USD || 2);
 const MIN_USD     = PRICE_USD - 0.05; // tolerância p/ flutuação de cotação / taxas
 
 router.use(requireAuth);
+
+// ── GET /qr — QR code Solana Pay (USDC) ─────────────────────
+router.get('/qr', async (req, res) => {
+  const uri = `solana:${PAY_ADDRESS}?amount=${PRICE_USD}&spl-token=${USDC_MINT}&label=CryptoVault&message=Acesso%20vitalicio`;
+  try {
+    const qr = await QRCode.toDataURL(uri, { width: 280, margin: 2, color: { dark: '#0f0f1a', light: '#ffffff' } });
+    res.json({ qr, uri, address: PAY_ADDRESS, price: PRICE_USD });
+  } catch (e) {
+    console.error('payment.qr:', e);
+    res.status(500).json({ error: 'Erro ao gerar QR' });
+  }
+});
 
 // ── GET /status ──────────────────────────────────────────────
 router.get('/status', async (req, res) => {

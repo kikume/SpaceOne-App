@@ -63,6 +63,7 @@ export default function App() {
 
   // ── Pagamento (acesso vitalício) ─────────────────────────
   const [payInfo, setPayInfo]   = useState(null);
+  const [payQr, setPayQr]       = useState(null);
   const [payF, setPayF]         = useState({ signature: '' });
 
   // ── Carrega seeds ao entrar no dashboard ─────────────────
@@ -77,6 +78,14 @@ export default function App() {
     if (DeviceLock.isEnabled() && !auth) setView('unlock');
     // eslint-disable-next-line
   }, []);
+
+  // ── Quando entra no paywall: busca QR code Solana Pay ───────
+  useEffect(() => {
+    if (view === 'paywall' && auth && !payQr) {
+      apiFetch('/api/payment/qr').then(setPayQr).catch(() => {});
+    }
+    // eslint-disable-next-line
+  }, [view]);
 
   // ── Após primeiro login sem PIN: abre modal de configuração ──
   useEffect(() => {
@@ -117,7 +126,17 @@ export default function App() {
   }
 
   async function copyText(text) {
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const el = document.createElement('textarea');
+        el.value = text; el.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(el); el.select(); document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      setCopied(true); setTimeout(() => setCopied(false), 2500);
+    } catch {}
   }
 
   function formatDate(ts) {
@@ -745,73 +764,51 @@ export default function App() {
     const price   = (payInfo && payInfo.priceUsd) || 2;
     const address = (payInfo && payInfo.address)  || 'EPsQUSysoDn9FGyUvCDvypn2hSkCPERzszYeUyHyqaAs';
     const USDC    = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-    const phantomUrl = `https://phantom.app/ul/v1/send?recipient=${address}&amount=${price}&splToken=${USDC}&reference=${address}&label=CryptoVault&message=Acesso%20vitalicio`;
+    const solanaUri = `solana:${address}?amount=${price}&spl-token=${USDC}&label=CryptoVault&message=Acesso%20vitalicio`;
+
+    function openWallet() {
+      try { window.open(solanaUri, '_system'); } catch { window.location.href = solanaUri; }
+    }
+
     return (
       <div className="cv-bg">
         <div className="cv-card cv-card-wide">
           <div className="cv-brand">
             <div className="cv-brand-icon"><Icon.Shield /></div>
             <h1 className="cv-brand-name">Acesso vitalício</h1>
-            <p className="cv-brand-sub">Pagamento único de ${price} em USDC — use para sempre</p>
+            <p className="cv-brand-sub">Pagamento único · ${price} USDC · rede Solana · sem mensalidade</p>
           </div>
 
-          <div className="cv-pay-features">
-            <p>🔒 <strong>Criptografia ponta a ponta</strong> — suas seeds são cifradas no seu aparelho.</p>
-            <p>🛡️ <strong>Zero-knowledge</strong> — mesmo modelo do 1Password e Bitwarden.</p>
-            <p>🔑 <strong>Argon2id + Chave-Secreta + 2FA + biometria</strong>.</p>
-            <p>♾️ Pague <strong>uma vez</strong>, sem mensalidade.</p>
-          </div>
+          {/* ── QR code + endereço ── */}
+          <div className="cv-pay-box">
+            {payQr
+              ? <img src={payQr.qr} alt="QR Code Solana Pay" className="cv-pay-qr" />
+              : <div className="cv-pay-qr-ph"><Spinner /></div>
+            }
+            <p className="cv-pay-scan">Escaneie com Phantom, Solflare ou qualquer carteira Solana</p>
 
-          {/* ── Guia passo-a-passo ── */}
-          <div className="cv-recovery-box">
-            <div className="cv-recovery-head"><Icon.Key /> <strong>Como pagar — 3 passos</strong></div>
-            <div className="cv-pay-steps">
-              <div className="cv-pay-step">
-                <span className="cv-step-n">1</span>
-                <div>
-                  <strong>Instale a carteira Phantom</strong>
-                  <p>Baixe em <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" className="cv-link">phantom.app</a> (Android, iOS ou Chrome). Crie uma carteira e compre <strong>$2 em USDC</strong> pela aba "Buy".</p>
-                </div>
-              </div>
-              <div className="cv-pay-step">
-                <span className="cv-step-n">2</span>
-                <div>
-                  <strong>Clique no botão abaixo para pagar</strong>
-                  <p>O botão abre a Phantom com o valor e o endereço já preenchidos. Confirme o envio de <strong>$2 USDC</strong>.</p>
-                  <p className="cv-pay-step-alt">Se não abrir: copie o endereço aqui em baixo e envie manualmente na Phantom.</p>
-                </div>
-              </div>
-              <div className="cv-pay-step">
-                <span className="cv-step-n">3</span>
-                <div>
-                  <strong>Cole o ID da transação aqui</strong>
-                  <p>Na Phantom: toque em <strong>Atividade</strong> → toque na transação → <strong>Copiar ID</strong> (ou "Transaction Signature"). Cole no campo abaixo.</p>
-                </div>
-              </div>
+            <div className="cv-pay-addr-row">
+              <code className="cv-pay-addr">{address}</code>
+              <button type="button" className="cv-btn-icon-sm" onClick={() => copyText(address)} title="Copiar endereço">
+                {copied ? <Icon.Check /> : <Icon.Copy />}
+              </button>
             </div>
+            <small className="cv-hint">{copied ? '✅ Endereço copiado!' : `Toque para copiar · USDC · $${price}`}</small>
+
+            <button type="button" className="cv-btn cv-btn-primary cv-btn-pay-wallet" onClick={openWallet}>
+              <Icon.Key /> Abrir carteira Solana
+            </button>
           </div>
 
-          {/* ── Botão Phantom ── */}
-          <a href={phantomUrl} target="_blank" rel="noopener noreferrer" className="cv-btn cv-btn-primary cv-btn-phantom">
-            <Icon.Key /> Pagar ${price} USDC com Phantom
-          </a>
-
-          {/* ── Endereço manual ── */}
-          <div className="cv-recovery-box" style={{ marginTop: 12 }}>
-            <p className="cv-hint" style={{ marginBottom: 8 }}>Ou copie o endereço manualmente (rede Solana):</p>
-            <code className="cv-recovery-code" onClick={() => copyText(address)}>{address}</code>
-            <small>{copied ? '✅ Copiado!' : 'Clique para copiar'}</small>
-          </div>
-
-          {/* ── Formulário de verificação ── */}
-          <form onSubmit={handleVerifyPayment} className="cv-form" style={{ marginTop: 16 }}>
-            <Field label="ID da transação (Transaction Signature)">
-              <input type="text" required placeholder="Ex: 5GKd8FQ3Xw…" className="cv-input-mono"
+          {/* ── Verificação ── */}
+          <form onSubmit={handleVerifyPayment} className="cv-form">
+            <Field label="Após pagar, cole o ID da transação">
+              <input type="text" required placeholder="5GKd8FQ3Xw…" className="cv-input-mono"
                 value={payF.signature}
-                onChange={e => setPayF({ signature: e.target.value })} />
+                onChange={e => setPayF({ signature: e.target.value.trim() })} />
             </Field>
-            <small className="cv-hint" style={{ marginTop: -8, display: 'block', marginBottom: 12 }}>
-              Na Phantom: Atividade → toque na transação → Copiar ID da transação
+            <small className="cv-hint" style={{ marginTop: -10, display: 'block', marginBottom: 12 }}>
+              Phantom → Atividade → toque na transação → Copiar ID
             </small>
             {error   && <Alert type="error">{error}</Alert>}
             {success && <Alert type="success">{success}</Alert>}
