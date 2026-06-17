@@ -684,7 +684,20 @@ body {
 }
 .cv-input-pin::placeholder { letter-spacing: 10px; font-size: 22px; }
 
-/* ── Paywall: lista de benefícios ────────────────────────── */
+/* ── Paywall ─────────────────────────────────────────────── */
 .cv-pay-features { margin: 4px 0 18px; display: flex; flex-direction: column; gap: 10px; }
 .cv-pay-features p { font-size: 14px; color: var(--text-2); line-height: 1.5; }
 .cv-pay-features strong { color: var(--text); }
+
+.cv-pay-steps { display: flex; flex-direction: column; gap: 14px; margin: 14px 0 4px; }
+.cv-pay-step { display: flex; gap: 14px; align-items: flex-start; }
+.cv-pay-step > div { flex: 1; }
+.cv-pay-step > div strong { display: block; font-size: 14px; color: var(--text); margin-bottom: 4px; }
+.cv-pay-step > div p { font-size: 13px; color: var(--text-2); line-height: 1.5; margin: 0 0 4px; }
+.cv-pay-step-alt { color: var(--text-3) !important; font-style: italic; }
+.cv-link { color: var(--primary); text-decoration: none; }
+.cv-link:hover { text-decoration: underline; }
+
+.cv-btn-phantom { display: flex; justify-content: center; text-decoration: none;
+  margin-top: 16px; width: 100%; gap: 8px; }
+.cv-btn-phantom svg { width: 18px; height: 18px; }

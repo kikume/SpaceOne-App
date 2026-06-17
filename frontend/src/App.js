@@ -41,7 +41,7 @@ export default function App() {
   const [savedRecovery, setSavedRecovery] = useState(false);
 
   // ── Formulários ──────────────────────────────────────────
-  const [loginF, setLoginF]   = useState({ email: '', password: '', secretKey: '', totpCode: '' });
+  const [loginF, setLoginF]   = useState({ email: '', password: '', totpCode: '' });
   const [regF, setRegF]       = useState({ email: '', password: '', confirm: '' });
   const [recF, setRecF]       = useState({ email: '', recoveryCode: '', secretKey: '', newPassword: '', confirm: '' });
   const [seedF, setSeedF]     = useState({ title: '', seedPhrase: '' });
@@ -49,15 +49,20 @@ export default function App() {
   const [showSeed, setShowSeed] = useState(false);
   const [copied, setCopied]   = useState(false);
 
+  // ── Dispositivo novo: pede Chave-Secreta só quando não está guardada localmente ──
+  const [needsSecretKey, setNeedsSecretKey] = useState(false);
+  const [newDeviceSK, setNewDeviceSK]       = useState('');
+
   // ── Desbloqueio rápido (PIN / biometria por aparelho) ────
   const [bioAvailable, setBioAvailable] = useState(false);
   const [unlockF, setUnlockF]   = useState({ pin: '' });
   const [pinSetup, setPinSetup] = useState({ pin: '', confirm: '', useBio: false });
-  const [gateSeed, setGateSeed] = useState(null); // seed aguardando trava p/ revelar
+  const [gateSeed, setGateSeed] = useState(null);
   const [gatePin, setGatePin]   = useState('');
+  const [promptedPin, setPromptedPin] = useState(false);
 
   // ── Pagamento (acesso vitalício) ─────────────────────────
-  const [payInfo, setPayInfo]   = useState(null); // { address, priceUsd, coins }
+  const [payInfo, setPayInfo]   = useState(null);
   const [payF, setPayF]         = useState({ signature: '' });
 
   // ── Carrega seeds ao entrar no dashboard ─────────────────
@@ -72,6 +77,16 @@ export default function App() {
     if (DeviceLock.isEnabled() && !auth) setView('unlock');
     // eslint-disable-next-line
   }, []);
+
+  // ── Após primeiro login sem PIN: abre modal de configuração ──
+  useEffect(() => {
+    if (view === 'dashboard' && auth && !DeviceLock.isEnabled() && !promptedPin) {
+      setPromptedPin(true);
+      const t = setTimeout(() => setModal({ type: 'devicelock' }), 800);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line
+  }, [view]);
 
   // ── Helpers ──────────────────────────────────────────────
   function clearMsgs() { setError(''); setSuccess(''); }
@@ -122,6 +137,8 @@ export default function App() {
     setLoading(true);
     try {
       const reg = await Vault.buildRegistration(regF.email.trim(), regF.password);
+      // Guarda a Chave-Secreta neste aparelho para login automático nas próximas vezes
+      try { localStorage.setItem('cv_sk_' + regF.email.trim().toLowerCase(), reg.secretKey); } catch {}
       const data = await apiFetch('/api/auth/register', { method: 'POST', body: JSON.stringify(reg.payload) });
       setRegResult({ qrCode: data.qrCode, totpSecret: data.totpSecret, recoveryCode: reg.recoveryCode, secretKey: reg.secretKey });
       setSavedRecovery(false);
@@ -142,17 +159,33 @@ export default function App() {
 
     setLoading(true);
     try {
-      const { kdfSalt } = await apiFetch(`/api/auth/params?email=${encodeURIComponent(loginF.email.trim())}`);
-      const derived = await Vault.deriveLogin(loginF.password, kdfSalt, loginF.secretKey.trim());
+      const email = loginF.email.trim();
+      const { kdfSalt } = await apiFetch(`/api/auth/params?email=${encodeURIComponent(email)}`);
+
+      // Chave-Secreta: guardada localmente no aparelho; o usuário só precisa inserir numa vez (aparelho novo)
+      const storedSK = localStorage.getItem('cv_sk_' + email.toLowerCase()) || newDeviceSK.trim();
+      const derived  = await Vault.deriveLogin(loginF.password, kdfSalt, storedSK);
+
       const data = await apiFetch('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email: loginF.email.trim(), authKey: derived.authKey, totpCode: loginF.totpCode }),
+        body: JSON.stringify({ email, authKey: derived.authKey, totpCode: loginF.totpCode }),
       });
       let dekBytes;
       try { dekBytes = await Vault.unwrapDek(derived.kek, data.wrappedDekPw); }
-      catch { throw new Error('Falha ao abrir o cofre. Tente novamente.'); }
+      catch {
+        if (!storedSK) {
+          setNeedsSecretKey(true);
+          throw new Error('Aparelho novo detectado — insira sua Chave-Secreta abaixo e tente novamente');
+        }
+        throw new Error('Falha ao abrir o cofre. Verifique sua senha.');
+      }
 
-      setLoginF({ email: '', password: '', secretKey: '', totpCode: '' });
+      // Guarda SK para futuros logins neste aparelho
+      if (newDeviceSK.trim()) {
+        try { localStorage.setItem('cv_sk_' + email.toLowerCase(), newDeviceSK.trim()); } catch {}
+      }
+      setLoginF({ email: '', password: '', totpCode: '' });
+      setNewDeviceSK(''); setNeedsSecretKey(false);
       await gotoVault(data.token, data.email, dekBytes);
     } catch (err) {
       setError(err.message);
@@ -324,7 +357,7 @@ export default function App() {
   async function handleEnableDeviceLock(e) {
     e.preventDefault();
     clearMsgs();
-    if (!/^\d{6}$/.test(pinSetup.pin)) return setError('O PIN deve ter 6 dígitos');
+    if (!/^\d{4}$/.test(pinSetup.pin)) return setError('O PIN deve ter 4 dígitos');
     if (pinSetup.pin !== pinSetup.confirm) return setError('Os PINs não coincidem');
     setLoading(true);
     try {
@@ -437,11 +470,18 @@ export default function App() {
               </div>
             </Field>
 
-            <Field label="Chave-Secreta">
-              <input type="text" autoComplete="off" placeholder="CV1-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" className="cv-input-mono"
-                value={loginF.secretKey}
-                onChange={e => setLoginF(p => ({ ...p, secretKey: e.target.value.toUpperCase() }))} />
-            </Field>
+            {needsSecretKey && (
+              <>
+                <Alert type="warning">
+                  📱 Aparelho novo — insira a Chave-Secreta gerada no cadastro
+                </Alert>
+                <Field label="Chave-Secreta">
+                  <input type="text" autoComplete="off" autoFocus placeholder="CV1-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" className="cv-input-mono"
+                    value={newDeviceSK}
+                    onChange={e => setNewDeviceSK(e.target.value.toUpperCase())} />
+                </Field>
+              </>
+            )}
 
             <Field label="Código Google Authenticator (6 dígitos)">
               <input type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="000000" maxLength={6} className="cv-input-mono"
@@ -672,9 +712,9 @@ export default function App() {
             <Field label="PIN">
               <input
                 type="password" inputMode="numeric" autoComplete="off" autoFocus
-                className="cv-input-pin" placeholder="••••••" maxLength={6}
+                className="cv-input-pin" placeholder="••••" maxLength={4}
                 value={unlockF.pin}
-                onChange={e => setUnlockF({ pin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                onChange={e => setUnlockF({ pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
               />
             </Field>
 
@@ -702,36 +742,77 @@ export default function App() {
   // TELA: PAYWALL (pagamento único para liberar)
   // ════════════════════════════════════════════════════════
   if (view === 'paywall' && auth) {
-    const price = (payInfo && payInfo.priceUsd) || 2;
+    const price   = (payInfo && payInfo.priceUsd) || 2;
+    const address = (payInfo && payInfo.address)  || 'EPsQUSysoDn9FGyUvCDvypn2hSkCPERzszYeUyHyqaAs';
+    const USDC    = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const phantomUrl = `https://phantom.app/ul/v1/send?recipient=${address}&amount=${price}&splToken=${USDC}&reference=${address}&label=CryptoVault&message=Acesso%20vitalicio`;
     return (
       <div className="cv-bg">
         <div className="cv-card cv-card-wide">
           <div className="cv-brand">
             <div className="cv-brand-icon"><Icon.Shield /></div>
             <h1 className="cv-brand-name">Acesso vitalício</h1>
-            <p className="cv-brand-sub">Pagamento único de ${price} em cripto — use para sempre</p>
+            <p className="cv-brand-sub">Pagamento único de ${price} em USDC — use para sempre</p>
           </div>
 
           <div className="cv-pay-features">
-            <p>🔒 <strong>Criptografia ponta a ponta</strong> — suas seeds são cifradas no seu aparelho. Nem nós conseguimos lê-las.</p>
+            <p>🔒 <strong>Criptografia ponta a ponta</strong> — suas seeds são cifradas no seu aparelho.</p>
             <p>🛡️ <strong>Zero-knowledge</strong> — mesmo modelo do 1Password e Bitwarden.</p>
             <p>🔑 <strong>Argon2id + Chave-Secreta + 2FA + biometria</strong>.</p>
             <p>♾️ Pague <strong>uma vez</strong>, sem mensalidade.</p>
           </div>
 
+          {/* ── Guia passo-a-passo ── */}
           <div className="cv-recovery-box">
-            <div className="cv-recovery-head"><Icon.Key /> <strong>Pague ${price} em USDC ou SOL (rede Solana)</strong></div>
-            <p className="cv-hint" style={{ marginBottom: 8 }}>Envie de qualquer carteira Solana (Phantom, etc.) para:</p>
-            <code className="cv-recovery-code" onClick={() => copyText(payInfo && payInfo.address)}>{(payInfo && payInfo.address) || '...'}</code>
-            <small>Clique para copiar o endereço</small>
+            <div className="cv-recovery-head"><Icon.Key /> <strong>Como pagar — 3 passos</strong></div>
+            <div className="cv-pay-steps">
+              <div className="cv-pay-step">
+                <span className="cv-step-n">1</span>
+                <div>
+                  <strong>Instale a carteira Phantom</strong>
+                  <p>Baixe em <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" className="cv-link">phantom.app</a> (Android, iOS ou Chrome). Crie uma carteira e compre <strong>$2 em USDC</strong> pela aba "Buy".</p>
+                </div>
+              </div>
+              <div className="cv-pay-step">
+                <span className="cv-step-n">2</span>
+                <div>
+                  <strong>Clique no botão abaixo para pagar</strong>
+                  <p>O botão abre a Phantom com o valor e o endereço já preenchidos. Confirme o envio de <strong>$2 USDC</strong>.</p>
+                  <p className="cv-pay-step-alt">Se não abrir: copie o endereço aqui em baixo e envie manualmente na Phantom.</p>
+                </div>
+              </div>
+              <div className="cv-pay-step">
+                <span className="cv-step-n">3</span>
+                <div>
+                  <strong>Cole o ID da transação aqui</strong>
+                  <p>Na Phantom: toque em <strong>Atividade</strong> → toque na transação → <strong>Copiar ID</strong> (ou "Transaction Signature"). Cole no campo abaixo.</p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <form onSubmit={handleVerifyPayment} className="cv-form">
-            <Field label="Depois de pagar, cole a assinatura (signature) da transação">
-              <input type="text" required placeholder="signature da transação Solana" className="cv-input-mono"
+          {/* ── Botão Phantom ── */}
+          <a href={phantomUrl} target="_blank" rel="noopener noreferrer" className="cv-btn cv-btn-primary cv-btn-phantom">
+            <Icon.Key /> Pagar ${price} USDC com Phantom
+          </a>
+
+          {/* ── Endereço manual ── */}
+          <div className="cv-recovery-box" style={{ marginTop: 12 }}>
+            <p className="cv-hint" style={{ marginBottom: 8 }}>Ou copie o endereço manualmente (rede Solana):</p>
+            <code className="cv-recovery-code" onClick={() => copyText(address)}>{address}</code>
+            <small>{copied ? '✅ Copiado!' : 'Clique para copiar'}</small>
+          </div>
+
+          {/* ── Formulário de verificação ── */}
+          <form onSubmit={handleVerifyPayment} className="cv-form" style={{ marginTop: 16 }}>
+            <Field label="ID da transação (Transaction Signature)">
+              <input type="text" required placeholder="Ex: 5GKd8FQ3Xw…" className="cv-input-mono"
                 value={payF.signature}
                 onChange={e => setPayF({ signature: e.target.value })} />
             </Field>
+            <small className="cv-hint" style={{ marginTop: -8, display: 'block', marginBottom: 12 }}>
+              Na Phantom: Atividade → toque na transação → Copiar ID da transação
+            </small>
             {error   && <Alert type="error">{error}</Alert>}
             {success && <Alert type="success">{success}</Alert>}
             <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
@@ -911,9 +992,9 @@ export default function App() {
             </div>
             <form onSubmit={handleGatePin}>
               <Field label="PIN">
-                <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••••" maxLength={6}
+                <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••" maxLength={4}
                   value={gatePin}
-                  onChange={e => setGatePin(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+                  onChange={e => setGatePin(e.target.value.replace(/\D/g, '').slice(0, 4))} />
               </Field>
               {error && <Alert type="error">{error}</Alert>}
               <div className="cv-modal-actions">
@@ -953,15 +1034,15 @@ export default function App() {
                 <Alert type="warning">
                   ⚠️ Guarda uma cópia <strong>cifrada</strong> da chave neste aparelho, protegida pelo PIN. Conveniência com algum risco — ative só em aparelhos seus. Após 5 PINs errados, apaga sozinho.
                 </Alert>
-                <Field label="Criar PIN (6 dígitos)">
-                  <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••••" maxLength={6}
+                <Field label="Criar PIN (4 dígitos)">
+                  <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••" maxLength={4}
                     value={pinSetup.pin}
-                    onChange={e => setPinSetup(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))} />
+                    onChange={e => setPinSetup(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))} />
                 </Field>
                 <Field label="Confirmar PIN">
-                  <input type="password" inputMode="numeric" className="cv-input-pin" placeholder="••••••" maxLength={6}
+                  <input type="password" inputMode="numeric" className="cv-input-pin" placeholder="••••" maxLength={4}
                     value={pinSetup.confirm}
-                    onChange={e => setPinSetup(p => ({ ...p, confirm: e.target.value.replace(/\D/g, '').slice(0, 6) }))} />
+                    onChange={e => setPinSetup(p => ({ ...p, confirm: e.target.value.replace(/\D/g, '').slice(0, 4) }))} />
                 </Field>
                 {bioAvailable && (
                   <label className="cv-checkbox">
