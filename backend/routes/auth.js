@@ -82,8 +82,8 @@ router.post('/login', async (req, res) => {
   }
   try {
     const r = await pool.query('SELECT * FROM users WHERE email = $1', [norm(email)]);
-    // Erro genérico para qualquer falha (anti-enumeração)
-    const fail = () => res.status(401).json({ error: 'Credenciais inválidas' });
+    // Erro genérico para qualquer falha (anti-enumeração), mas guiando o usuário
+    const fail = () => res.status(401).json({ error: 'Email, senha ou código 2FA incorretos. Confira os três (o email precisa ser exatamente o que você cadastrou).' });
 
     if (r.rows.length === 0) { await bcrypt.compare(authKey, DECOY_HASH); return fail(); }
     const user = r.rows[0];
