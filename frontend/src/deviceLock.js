@@ -117,78 +117,45 @@ async function verifyPin(pin, currentDek) {
 
 // ════════════════════════════════════════════════════════════
 //  BIOMETRIA via WebAuthn + extensão PRF (best-effort)
-//  Requer contexto seguro (HTTPS ou localhost). Em celular real: HTTPS.
+//  A chave fica no Keystore nativo (Android/iOS) via biometricNative.js,
+//  liberada apenas após a biometria. Aqui só embrulhamos/desembrulhamos.
 // ════════════════════════════════════════════════════════════
-async function biometricAvailable() {
-  try {
-    if (!globalThis.PublicKeyCredential) return false;
-    return await globalThis.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-  } catch { return false; }
-}
 
-const PRF_SALT = textEnc.encode('cryptovault-prf-v1');
-
-async function prfSecretFromAssertion(credentialIdB64) {
-  const assertion = await globalThis.navigator.credentials.get({
-    publicKey: {
-      challenge: RAND(32),
-      allowCredentials: credentialIdB64 ? [{ id: b64dec(credentialIdB64), type: 'public-key' }] : [],
-      userVerification: 'required',
-      timeout: 60000,
-      extensions: { prf: { eval: { first: PRF_SALT } } },
-    },
-  });
-  const ext = assertion.getClientExtensionResults();
-  if (!ext.prf || !ext.prf.results || !ext.prf.results.first) {
-    throw new Error('Este dispositivo/navegador não suporta biometria com chave (PRF)');
-  }
-  return { secret: new Uint8Array(ext.prf.results.first), credentialId: b64enc(new Uint8Array(assertion.rawId)) };
-}
-
-async function enrollBiometric({ email, dek, refreshToken }) {
-  const cred = await globalThis.navigator.credentials.create({
-    publicKey: {
-      challenge: RAND(32),
-      rp: { name: 'CryptoVault' },
-      user: { id: textEnc.encode(email).slice(0, 64), name: email, displayName: email },
-      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
-      timeout: 60000,
-      extensions: { prf: {} },
-    },
-  });
-  const credentialId = b64enc(new Uint8Array(cred.rawId));
-  // Obtém o segredo PRF (precisa de um get() após o create na maioria das plataformas)
-  const { secret } = await prfSecretFromAssertion(credentialId);
-  const rec = getRecord() || { email, fails: 0 };
-  rec.email = email;
+// Gera uma bioKey aleatória, embrulha a DEK + refresh com ela, e DEVOLVE a
+// bioKey (base64) para o chamador guardar no Keystore protegido por biometria.
+async function enrollBiometric({ dek, refreshToken }) {
+  const rec = getRecord();
+  if (!rec) throw new Error('Ative o PIN antes da biometria');
+  const bioKey = RAND(32);
   rec.bio = {
-    credentialId,
-    wrappedDekBio: await aesWrap(secret, dek),
-    wrappedRefBio: await aesWrap(secret, textEnc.encode(refreshToken)),
+    wrappedDekBio: await aesWrap(bioKey, dek),
+    wrappedRefBio: await aesWrap(bioKey, textEnc.encode(refreshToken)),
   };
   setRecord(rec);
-  return true;
+  return b64enc(bioKey);
 }
 
-async function unlockBiometric() {
+// Recebe a bioKey (base64, vinda do Keystore após a biometria) e desembrulha.
+async function unlockBiometric(bioKeyB64) {
   const rec = getRecord();
   if (!rec || !rec.bio) throw new Error('Biometria não configurada neste aparelho');
-  const { secret } = await prfSecretFromAssertion(rec.bio.credentialId);
-  const dek          = await aesUnwrap(secret, rec.bio.wrappedDekBio);
-  const refreshToken = textDec.decode(await aesUnwrap(secret, rec.bio.wrappedRefBio));
+  const bioKey       = b64dec(bioKeyB64);
+  const dek          = await aesUnwrap(bioKey, rec.bio.wrappedDekBio);
+  const refreshToken = textDec.decode(await aesUnwrap(bioKey, rec.bio.wrappedRefBio));
   return { email: rec.email, dek, refreshToken };
 }
 
-async function verifyBiometric(currentDek) {
-  const { dek } = await unlockBiometric();
-  return eqBytes(dek, currentDek);
+async function verifyBiometric(bioKeyB64, currentDek) {
+  const rec = getRecord();
+  if (!rec || !rec.bio) return false;
+  try { return eqBytes(await aesUnwrap(b64dec(bioKeyB64), rec.bio.wrappedDekBio), currentDek); }
+  catch { return false; }
 }
 
 const DeviceLock = {
   isEnabled, enabledEmail, hasBiometric, pinFailsLeft, forget,
   enrollPin, unlockPin, verifyPin,
-  biometricAvailable, enrollBiometric, unlockBiometric, verifyBiometric,
+  enrollBiometric, unlockBiometric, verifyBiometric,
   MAX_PIN_FAILS,
 };
 

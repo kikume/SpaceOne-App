@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Vault from './crypto';
 import DeviceLock from './deviceLock';
+import * as BioNative from './biometricNative';
 import './App.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -40,9 +41,9 @@ export default function App() {
   const [savedRecovery, setSavedRecovery] = useState(false);
 
   // ── Formulários ──────────────────────────────────────────
-  const [loginF, setLoginF]   = useState({ email: '', password: '', totpCode: '' });
+  const [loginF, setLoginF]   = useState({ email: '', password: '', secretKey: '', totpCode: '' });
   const [regF, setRegF]       = useState({ email: '', password: '', confirm: '' });
-  const [recF, setRecF]       = useState({ email: '', recoveryCode: '', newPassword: '', confirm: '' });
+  const [recF, setRecF]       = useState({ email: '', recoveryCode: '', secretKey: '', newPassword: '', confirm: '' });
   const [seedF, setSeedF]     = useState({ title: '', seedPhrase: '' });
   const [showPass, setShowPass] = useState(false);
   const [showSeed, setShowSeed] = useState(false);
@@ -63,7 +64,7 @@ export default function App() {
 
   // ── Ao abrir o app: se este aparelho já tem desbloqueio rápido, vai pra tela de unlock ──
   useEffect(() => {
-    DeviceLock.biometricAvailable().then(setBioAvailable).catch(() => {});
+    BioNative.isAvailable().then(setBioAvailable).catch(() => {});
     if (DeviceLock.isEnabled() && !auth) setView('unlock');
     // eslint-disable-next-line
   }, []);
@@ -118,7 +119,7 @@ export default function App() {
     try {
       const reg = await Vault.buildRegistration(regF.email.trim(), regF.password);
       const data = await apiFetch('/api/auth/register', { method: 'POST', body: JSON.stringify(reg.payload) });
-      setRegResult({ qrCode: data.qrCode, totpSecret: data.totpSecret, recoveryCode: reg.recoveryCode });
+      setRegResult({ qrCode: data.qrCode, totpSecret: data.totpSecret, recoveryCode: reg.recoveryCode, secretKey: reg.secretKey });
       setSavedRecovery(false);
       setRegF({ email: '', password: '', confirm: '' });
       setView('qrcode');
@@ -138,7 +139,7 @@ export default function App() {
     setLoading(true);
     try {
       const { kdfSalt } = await apiFetch(`/api/auth/params?email=${encodeURIComponent(loginF.email.trim())}`);
-      const derived = await Vault.deriveLogin(loginF.password, kdfSalt);
+      const derived = await Vault.deriveLogin(loginF.password, kdfSalt, loginF.secretKey.trim());
       const data = await apiFetch('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email: loginF.email.trim(), authKey: derived.authKey, totpCode: loginF.totpCode }),
@@ -177,7 +178,7 @@ export default function App() {
       try { dekRec = await Vault.unwrapDek(r.kek, v.wrappedDekRc); }
       catch { throw new Error('Código de recuperação incorreto'); }
 
-      const reset = await Vault.buildPasswordReset(recF.newPassword, dekRec);
+      const reset = await Vault.buildPasswordReset(recF.newPassword, dekRec, recF.secretKey.trim());
       await apiFetch('/api/auth/recover/commit', {
         method: 'POST',
         body: JSON.stringify({ recoveryToken: v.recoveryToken, newAuthKey: reset.authKey, newKdfSalt: reset.kdfSalt, newWrappedDekPw: reset.wrappedDekPw }),
@@ -278,7 +279,8 @@ export default function App() {
     clearMsgs();
     setLoading(true);
     try {
-      const r = await DeviceLock.unlockBiometric();
+      const bioKeyB64 = await BioNative.getKey();
+      const r = await DeviceLock.unlockBiometric(bioKeyB64);
       await openVaultWith(r.dek, r.refreshToken);
     } catch (err) {
       setError(err.message);
@@ -302,8 +304,10 @@ export default function App() {
       await DeviceLock.enrollPin({ email: auth.email, pin: pinSetup.pin, dek, refreshToken });
       let extra = '';
       if (pinSetup.useBio) {
-        try { await DeviceLock.enrollBiometric({ email: auth.email, dek, refreshToken }); }
-        catch { extra = ' (biometria não pôde ser ativada aqui — PIN funcionando)'; }
+        try {
+          const bioKeyB64 = await DeviceLock.enrollBiometric({ dek, refreshToken });
+          await BioNative.storeKey(auth.email, bioKeyB64);
+        } catch { extra = ' (biometria não pôde ser ativada aqui — PIN funcionando)'; }
       }
       setModal(null);
       setPinSetup({ pin: '', confirm: '', useBio: false });
@@ -321,6 +325,7 @@ export default function App() {
     try {
       await apiFetch('/api/auth/device/revoke', { method: 'POST' });
       DeviceLock.forget();
+      await BioNative.deleteKey();
       setModal(null);
       showSuccess('Desbloqueio rápido desativado neste aparelho');
     } catch (err) {
@@ -358,7 +363,8 @@ export default function App() {
     clearMsgs();
     setLoading(true);
     try {
-      if (!(await DeviceLock.verifyBiometric(dek))) throw new Error('Biometria não confere');
+      const bioKeyB64 = await BioNative.getKey();
+      if (!(await DeviceLock.verifyBiometric(bioKeyB64, dek))) throw new Error('Biometria não confere');
       const seed = gateSeed;
       setGateSeed(null);
       setModal({ type: 'view', seed }); setShowSeed(true); setCopied(false);
@@ -398,6 +404,12 @@ export default function App() {
                   {showPass ? <Icon.EyeOff /> : <Icon.Eye />}
                 </button>
               </div>
+            </Field>
+
+            <Field label="Chave-Secreta">
+              <input type="text" autoComplete="off" placeholder="CV1-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" className="cv-input-mono"
+                value={loginF.secretKey}
+                onChange={e => setLoginF(p => ({ ...p, secretKey: e.target.value.toUpperCase() }))} />
             </Field>
 
             <Field label="Código Google Authenticator (6 dígitos)">
@@ -512,6 +524,16 @@ export default function App() {
             <small>Clique para copiar</small>
           </div>
 
+          {/* CHAVE-SECRETA — crítico */}
+          <div className="cv-recovery-box">
+            <div className="cv-recovery-head"><Icon.Key /> <strong>Sua Chave-Secreta</strong></div>
+            <code className="cv-recovery-code" onClick={() => copyText(regResult.secretKey)}>{regResult.secretKey}</code>
+            <small>Clique para copiar</small>
+            <Alert type="warning">
+              🗝️ Necessária para <strong>entrar em qualquer aparelho novo</strong>. Sem ela, nem você nem nós abrimos o cofre — nem com a senha certa. Guarde-a <strong>offline</strong>, junto com o código de recuperação.
+            </Alert>
+          </div>
+
           {/* CÓDIGO DE RECUPERAÇÃO — crítico */}
           <div className="cv-recovery-box">
             <div className="cv-recovery-head"><Icon.Key /> <strong>Seu código de recuperação</strong></div>
@@ -522,7 +544,7 @@ export default function App() {
             </Alert>
             <label className="cv-checkbox">
               <input type="checkbox" checked={savedRecovery} onChange={e => setSavedRecovery(e.target.checked)} />
-              <span>Salvei meu código de recuperação em local seguro</span>
+              <span>Salvei meu código de recuperação <strong>e minha Chave-Secreta</strong> em local seguro</span>
             </label>
           </div>
 
@@ -562,6 +584,12 @@ export default function App() {
               <input type="text" required placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" className="cv-input-mono"
                 value={recF.recoveryCode}
                 onChange={e => setRecF(p => ({ ...p, recoveryCode: e.target.value.toUpperCase() }))} />
+            </Field>
+
+            <Field label="Chave-Secreta">
+              <input type="text" required placeholder="CV1-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" className="cv-input-mono"
+                value={recF.secretKey}
+                onChange={e => setRecF(p => ({ ...p, secretKey: e.target.value.toUpperCase() }))} />
             </Field>
 
             <Field label="Nova senha (mínimo 8 caracteres)">

@@ -60,6 +60,17 @@ const eqBytes = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
     await DL.unlockPin(PIN); // reseta o contador
   });
 
+  await test('biometria: enrollBiometric devolve bioKey e unlockBiometric desembrulha', async () => {
+    const bioKeyB64 = await DL.enrollBiometric({ dek, refreshToken: refresh });
+    assert(typeof bioKeyB64 === 'string' && bioKeyB64.length > 0, 'sem bioKey');
+    const r = await DL.unlockBiometric(bioKeyB64);
+    assert(eqBytes(r.dek, dek), 'DEK via biometria não bateu');
+    assert(r.refreshToken === refresh, 'refresh via biometria não bateu');
+    assert(await DL.verifyBiometric(bioKeyB64, dek) === true, 'verifyBiometric deveria passar');
+    const wrongKey = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(32))).toString('base64');
+    assert(await DL.verifyBiometric(wrongKey, dek) === false, 'bioKey errada deveria falhar');
+  });
+
   await test('5 erros seguidos AUTO-APAGAM o desbloqueio (anti-brute-force)', async () => {
     let wiped = false;
     for (let i = 0; i < DL.MAX_PIN_FAILS; i++) {

@@ -59,19 +59,19 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
   });
 
   await test('login com SENHA errada → 401', async () => {
-    const d = await Vault.deriveLogin('senhaErrada!', await saltOf());
+    const d = await Vault.deriveLogin('senhaErrada!', await saltOf(), reg.secretKey);
     const { status } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d.authKey, totpCode: totp(totpSecret) } });
     assert(status === 401, `veio ${status}`);
   });
 
   await test('login com 2FA errado → 401', async () => {
-    const d = await Vault.deriveLogin(password, await saltOf());
+    const d = await Vault.deriveLogin(password, await saltOf(), reg.secretKey);
     const { status } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d.authKey, totpCode: '000000' } });
     assert(status === 401, `veio ${status}`);
   });
 
   await test('login correto → token + desembrulha a DEK', async () => {
-    const d = await Vault.deriveLogin(password, await saltOf());
+    const d = await Vault.deriveLogin(password, await saltOf(), reg.secretKey);
     const { status, data } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d.authKey, totpCode: totp(totpSecret) } });
     assert(status === 200, `status ${status} ${data.error || ''}`);
     assert(data.token, 'sem token'); token = data.token;
@@ -151,11 +151,11 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
     const dekRec = await Vault.unwrapDek(r.kek, vd.wrappedDekRc);
     assert(eqBytes(dekRec, reg.dek), 'DEK recuperada não bateu');
 
-    const reset = await Vault.buildPasswordReset('NovaSenha456!', dekRec);
+    const reset = await Vault.buildPasswordReset('NovaSenha456!', dekRec, reg.secretKey);
     const { status: cs } = await api('/api/auth/recover/commit', { method: 'POST', body: { recoveryToken: vd.recoveryToken, newAuthKey: reset.authKey, newKdfSalt: reset.kdfSalt, newWrappedDekPw: reset.wrappedDekPw } });
     assert(cs === 200, `commit ${cs}`);
 
-    const d2 = await Vault.deriveLogin('NovaSenha456!', await saltOf());
+    const d2 = await Vault.deriveLogin('NovaSenha456!', await saltOf(), reg.secretKey);
     const { status: ls, data: ld } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d2.authKey, totpCode: totp(totpSecret) } });
     assert(ls === 200, `login nova senha ${ls}`);
     const dek2 = await Vault.unwrapDek(d2.kek, ld.wrappedDekPw);
