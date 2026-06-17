@@ -1,119 +1,55 @@
-const router          = require('express').Router();
-const requireAuth     = require('../middleware/auth');
-const { pool }        = require('../db');
-const { deriveKey, getEmailHash, encrypt, decrypt } = require('../utils/crypto');
-const { storeItemOnChain, getItemsFromChain }       = require('../lib/blockchain');
+const router      = require('express').Router();
+const requireAuth = require('../middleware/auth');
+const { pool }    = require('../db');
 
-// Todas as rotas de seeds exigem autenticação
 router.use(requireAuth);
 
-// ── POST /api/seeds ──────────────────────────────────────────
-// Salva uma nova seed criptografada na blockchain
-router.post('/', async (req, res) => {
-  const { title, seedPhrase } = req.body;
-
-  if (!title || !seedPhrase) {
-    return res.status(400).json({ error: 'Título e seed phrase são obrigatórios' });
-  }
-  if (title.includes('::')) {
-    return res.status(400).json({ error: 'O título não pode conter "::"' });
-  }
-  if (title.trim().length > 100) {
-    return res.status(400).json({ error: 'Título muito longo (máx 100 caracteres)' });
-  }
-
+// ── GET /seeds ───────────────────────────────────────────────
+// Devolve os blobs CIFRADOS. A descriptografia acontece no navegador.
+router.get('/', async (req, res) => {
   try {
-    const { email, userId } = req.user;
-
-    const result = await pool.query(
-      'SELECT password_hash FROM users WHERE id = $1',
-      [userId]
+    const r = await pool.query(
+      `SELECT id, blob, (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS timestamp
+         FROM seeds WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.user.userId]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Usuário não encontrado' });
-    }
-
-    const { password_hash } = result.rows[0];
-
-    // Deriva a chave de criptografia do hash da senha + email
-    const encryptionKey = deriveKey(password_hash, email);
-
-    // Criptografa a seed phrase
-    const encryptedSeed = encrypt(seedPhrase.trim(), encryptionKey);
-
-    // Prefixo no título para identificar o dono sem expor o email
-    const emailHash      = getEmailHash(email);
-    const blockchainTitle = `${emailHash}::${title.trim()}`;
-
-    // Salva na blockchain
-    const { txHash, blockNumber } = await storeItemOnChain(blockchainTitle, encryptedSeed);
-
-    res.json({
-      message:     'Seed salva com segurança na blockchain!',
-      txHash,
-      blockNumber,
-    });
+    res.json({ seeds: r.rows.map(x => ({ id: x.id, blob: x.blob, timestamp: Number(x.timestamp) })) });
   } catch (err) {
-    console.error('Save seed error:', err);
-
-    if (err.message && err.message.includes('insufficient funds')) {
-      return res.status(503).json({
-        error: 'Carteira mestre sem saldo AVAX. Recarregue em https://faucet.avax.network',
-      });
-    }
-
-    res.status(500).json({ error: 'Erro ao salvar seed. Tente novamente.' });
+    console.error('seeds.get:', err);
+    res.status(500).json({ error: 'Erro ao buscar seeds' });
   }
 });
 
-// ── GET /api/seeds ───────────────────────────────────────────
-// Lista e descriptografa todas as seeds do usuário autenticado
-router.get('/', async (req, res) => {
+// ── POST /seeds ──────────────────────────────────────────────
+// Recebe APENAS o blob cifrado. O servidor não sabe o que tem dentro.
+router.post('/', async (req, res) => {
+  const { blob } = req.body || {};
+  if (!blob || typeof blob !== 'string') return res.status(400).json({ error: 'Blob ausente' });
+  if (blob.length > 8192)               return res.status(400).json({ error: 'Blob muito grande' });
   try {
-    const { email, userId } = req.user;
-
-    const result = await pool.query(
-      'SELECT password_hash FROM users WHERE id = $1',
-      [userId]
+    const r = await pool.query(
+      `INSERT INTO seeds (user_id, blob) VALUES ($1, $2)
+       RETURNING id, (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS timestamp`,
+      [req.user.userId, blob]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Usuário não encontrado' });
-    }
-
-    const { password_hash } = result.rows[0];
-    const encryptionKey    = deriveKey(password_hash, email);
-    const emailHash        = getEmailHash(email);
-    const prefix           = `${emailHash}::`;
-
-    // Busca todos os itens da carteira mestre na blockchain
-    const allItems = await getItemsFromChain();
-
-    // Filtra os itens do usuário e descriptografa
-    const seeds = [];
-    for (const item of allItems) {
-      if (!item.title.startsWith(prefix)) continue;
-
-      try {
-        const actualTitle   = item.title.slice(prefix.length);
-        const decryptedSeed = decrypt(item.encryptedData, encryptionKey);
-        seeds.push({
-          title:       actualTitle,
-          seedPhrase:  decryptedSeed,
-          timestamp:   item.timestamp,
-        });
-      } catch (decryptErr) {
-        // Item corrompido ou de outro usuário com hash colidente — ignora silenciosamente
-        console.error('Falha ao descriptografar:', item.title, decryptErr.message);
-      }
-    }
-
-    // Mais recente primeiro
-    seeds.sort((a, b) => b.timestamp - a.timestamp);
-
-    res.json({ seeds });
+    res.status(201).json({ id: r.rows[0].id, timestamp: Number(r.rows[0].timestamp) });
   } catch (err) {
-    console.error('Get seeds error:', err);
-    res.status(500).json({ error: 'Erro ao buscar seeds. Tente novamente.' });
+    console.error('seeds.post:', err);
+    res.status(500).json({ error: 'Erro ao salvar seed' });
+  }
+});
+
+// ── DELETE /seeds/:id ────────────────────────────────────────
+router.delete('/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
+  try {
+    const r = await pool.query('DELETE FROM seeds WHERE id = $1 AND user_id = $2', [id, req.user.userId]);
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Seed não encontrada' });
+    res.json({ message: 'Seed removida' });
+  } catch (err) {
+    console.error('seeds.delete:', err);
+    res.status(500).json({ error: 'Erro ao remover seed' });
   }
 });
 

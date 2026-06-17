@@ -7,10 +7,13 @@ module.exports = function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Token de autenticação não fornecido' });
   }
 
-  const token = authorization.slice(7);
-
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(authorization.slice(7), process.env.JWT_SECRET);
+    // Tokens de recuperação NÃO valem para acessar dados
+    if (payload.purpose !== 'access') {
+      return res.status(401).json({ error: 'Token inválido' });
+    }
+    req.user = payload;
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {

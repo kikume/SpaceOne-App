@@ -1,182 +1,119 @@
-/**
- * CryptoVault — Testes de Integração
- * Execute com: npm test (backend deve estar rodando em localhost:3001)
- * Requerimentos: Node.js 18+ (fetch nativo), speakeasy instalado
- */
+/* CryptoVault — Teste de integração ponta-a-ponta (modelo zero-knowledge).
+ * Simula EXATAMENTE o que o navegador faria, usando o mesmo módulo de cripto.
+ * Backend deve estar rodando em localhost:3001.  Uso: npm test */
 
-require('dotenv').config({ path: '../.env' });
+if (!globalThis.crypto) globalThis.crypto = require('crypto').webcrypto;
 const speakeasy = require('speakeasy');
+const Vault     = require('../../frontend/src/crypto.js');
 
-const BASE_URL   = process.env.TEST_API_URL || 'http://localhost:3001';
-const TEST_EMAIL = `teste_${Date.now()}@cryptovault.test`;
-const TEST_PASS  = 'SenhaSegura123!';
+const BASE     = process.env.TEST_API_URL || 'http://localhost:3001';
+const email    = `t_${Date.now()}@cryptovault.test`;
+const password = 'SenhaForte123!';
+const SEED     = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
-let authToken  = null;
-let totpSecret = null;
-
-let passed = 0;
-let failed = 0;
-
+let pass = 0, fail = 0;
 async function test(name, fn) {
-  process.stdout.write(`  ${name}... `);
-  try {
-    await fn();
-    console.log('✅ PASSOU');
-    passed++;
-  } catch (err) {
-    console.log(`❌ FALHOU: ${err.message}`);
-    failed++;
-  }
+  try { await fn(); console.log('  ✅', name); pass++; }
+  catch (e) { console.log('  ❌', name, '→', e.message); fail++; }
 }
+const assert  = (c, m) => { if (!c) throw new Error(m || 'falhou'); };
+const eqBytes = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
 
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
+async function api(path, { method = 'GET', body, token } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  let data = {}; try { data = await res.json(); } catch {}
+  return { status: res.status, data };
 }
+const saltOf = async () => (await api(`/api/auth/params?email=${encodeURIComponent(email)}`)).data.kdfSalt;
+const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
 
-async function api(path, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-    ...options.headers,
-  };
-  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  const data     = await response.json();
-  return { status: response.status, data };
-}
+(async () => {
+  console.log(`\n🧪 CryptoVault E2E — ${email}\n`);
+  let reg, totpSecret, token, dek, seedId;
 
-async function runTests() {
-  console.log('\n╔══════════════════════════════════════════╗');
-  console.log('║     🧪  CryptoVault — Testes            ║');
-  console.log('╠══════════════════════════════════════════╣');
-  console.log(`║  API: ${BASE_URL.padEnd(35)}║`);
-  console.log(`║  Email de teste: ${TEST_EMAIL.substring(0, 24).padEnd(24)}║`);
-  console.log('╚══════════════════════════════════════════╝\n');
-
-  // ── 1. Health check ──────────────────────────────────────
-  await test('Health check da API', async () => {
+  await test('health', async () => {
     const { status, data } = await api('/health');
-    assert(status === 200, `Esperava 200, recebeu ${status}`);
-    assert(data.status === 'ok', 'Status deveria ser "ok"');
+    assert(status === 200 && data.status === 'ok');
   });
 
-  // ── 2. Cadastro ──────────────────────────────────────────
-  await test('Cadastro com email e senha válidos', async () => {
-    const { status, data } = await api('/api/auth/register', {
-      method: 'POST',
-      body:   JSON.stringify({ email: TEST_EMAIL, password: TEST_PASS }),
-    });
-    assert(status === 201, `Esperava 201, recebeu ${status}: ${data.error}`);
-    assert(data.qrCode,     'Resposta deve conter qrCode');
-    assert(data.backupCode, 'Resposta deve conter backupCode');
-    totpSecret = data.backupCode;
-    console.log(`\n     Secret TOTP: ${totpSecret.substring(0, 20)}...`);
+  await test('cadastro envia só material cifrado (sem senha/seed)', async () => {
+    reg = await Vault.buildRegistration(email, password);
+    assert(!JSON.stringify(reg.payload).includes(password), 'payload vazou a senha!');
+    const { status, data } = await api('/api/auth/register', { method: 'POST', body: reg.payload });
+    assert(status === 201, `status ${status} ${data.error || ''}`);
+    assert(data.qrCode && data.totpSecret, 'faltou qrCode/totpSecret');
+    totpSecret = data.totpSecret;
   });
 
-  // ── 3. Cadastro duplicado ────────────────────────────────
-  await test('Cadastro com email já existente deve falhar (409)', async () => {
-    const { status, data } = await api('/api/auth/register', {
-      method: 'POST',
-      body:   JSON.stringify({ email: TEST_EMAIL, password: TEST_PASS }),
-    });
-    assert(status === 409, `Esperava 409, recebeu ${status}`);
-    assert(data.error, 'Resposta deve conter mensagem de erro');
+  await test('login com SENHA errada → 401', async () => {
+    const d = await Vault.deriveLogin('senhaErrada!', await saltOf());
+    const { status } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d.authKey, totpCode: totp(totpSecret) } });
+    assert(status === 401, `veio ${status}`);
   });
 
-  // ── 4. Login com senha errada ────────────────────────────
-  await test('Login com senha incorreta deve falhar (401)', async () => {
-    const totpCode = speakeasy.totp({ secret: totpSecret, encoding: 'base32' });
-    const { status, data } = await api('/api/auth/login', {
-      method: 'POST',
-      body:   JSON.stringify({ email: TEST_EMAIL, password: 'senhaErrada!', totpCode }),
-    });
-    assert(status === 401, `Esperava 401, recebeu ${status}`);
-    assert(data.error, 'Resposta deve conter mensagem de erro');
+  await test('login com 2FA errado → 401', async () => {
+    const d = await Vault.deriveLogin(password, await saltOf());
+    const { status } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d.authKey, totpCode: '000000' } });
+    assert(status === 401, `veio ${status}`);
   });
 
-  // ── 5. Login com código 2FA errado ───────────────────────
-  await test('Login com código 2FA incorreto deve falhar (401)', async () => {
-    const { status, data } = await api('/api/auth/login', {
-      method: 'POST',
-      body:   JSON.stringify({ email: TEST_EMAIL, password: TEST_PASS, totpCode: '000000' }),
-    });
-    assert(status === 401, `Esperava 401, recebeu ${status}`);
-    assert(data.error, 'Resposta deve conter mensagem de erro');
+  await test('login correto → token + desembrulha a DEK', async () => {
+    const d = await Vault.deriveLogin(password, await saltOf());
+    const { status, data } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d.authKey, totpCode: totp(totpSecret) } });
+    assert(status === 200, `status ${status} ${data.error || ''}`);
+    assert(data.token, 'sem token'); token = data.token;
+    dek = await Vault.unwrapDek(d.kek, data.wrappedDekPw);
+    assert(eqBytes(dek, reg.dek), 'DEK não bateu');
   });
 
-  // ── 6. Login correto ─────────────────────────────────────
-  await test('Login com credenciais corretas deve funcionar (200)', async () => {
-    const totpCode = speakeasy.totp({ secret: totpSecret, encoding: 'base32' });
-    const { status, data } = await api('/api/auth/login', {
-      method: 'POST',
-      body:   JSON.stringify({ email: TEST_EMAIL, password: TEST_PASS, totpCode }),
-    });
-    assert(status === 200, `Esperava 200, recebeu ${status}: ${data.error}`);
-    assert(data.token, 'Resposta deve conter JWT token');
-    authToken = data.token;
-    console.log('\n     Token JWT obtido com sucesso.');
-  });
-
-  // ── 7. Acesso sem token ──────────────────────────────────
-  await test('Acesso a /seeds sem token deve falhar (401)', async () => {
-    const savedToken = authToken;
-    authToken = null;
+  await test('GET /seeds sem token → 401', async () => {
     const { status } = await api('/api/seeds');
-    authToken = savedToken;
-    assert(status === 401, `Esperava 401, recebeu ${status}`);
+    assert(status === 401, `veio ${status}`);
   });
 
-  // ── 8. Salvar seed ───────────────────────────────────────
-  console.log('\n  ⏳ Testando blockchain (pode demorar ~15s)...');
-  await test('Salvar seed criptografada na blockchain', async () => {
-    const { status, data } = await api('/api/seeds', {
-      method: 'POST',
-      body:   JSON.stringify({
-        title:      'Carteira Teste Bitcoin',
-        seedPhrase: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
-      }),
-    });
-    assert(status === 200, `Esperava 200, recebeu ${status}: ${data.error}`);
-    assert(data.txHash,     'Resposta deve conter txHash');
-    assert(data.blockNumber, 'Resposta deve conter blockNumber');
-    console.log(`\n     TX Hash: ${data.txHash}`);
-    console.log(`     Bloco: ${data.blockNumber}`);
+  await test('salvar seed (cifrada no cliente, blob não vaza)', async () => {
+    const blob = await Vault.encryptSeed(dek, 'Carteira BTC', SEED);
+    assert(!blob.includes('abandon'), 'blob vazou a seed!');
+    const { status, data } = await api('/api/seeds', { method: 'POST', body: { blob }, token });
+    assert(status === 201, `status ${status} ${data.error || ''}`); seedId = data.id;
   });
 
-  // Aguarda a blockchain processar
-  console.log('\n  ⏳ Aguardando confirmação na blockchain...');
-  await new Promise(r => setTimeout(r, 5000));
-
-  // ── 9. Listar seeds ──────────────────────────────────────
-  await test('Listar seeds do usuário da blockchain', async () => {
-    const { status, data } = await api('/api/seeds');
-    assert(status === 200, `Esperava 200, recebeu ${status}: ${data.error}`);
-    assert(Array.isArray(data.seeds), 'seeds deve ser um array');
-    assert(data.seeds.length >= 1, `Deveria ter pelo menos 1 seed, tem ${data.seeds.length}`);
-    console.log(`\n     Encontradas: ${data.seeds.length} seed(s)`);
+  await test('listar e DECIFRAR a seed', async () => {
+    const { status, data } = await api('/api/seeds', { token });
+    assert(status === 200 && data.seeds.length === 1, `qtd ${data.seeds?.length}`);
+    const out = await Vault.decryptSeed(dek, data.seeds[0].blob);
+    assert(out.title === 'Carteira BTC', `título ${out.title}`);
+    assert(out.seedPhrase === SEED, 'seed não bateu');
   });
 
-  // ── 10. Verificar descriptografia ────────────────────────
-  await test('Seed descriptografada deve ser igual à original', async () => {
-    const { status, data } = await api('/api/seeds');
-    assert(status === 200, `Esperava 200, recebeu ${status}`);
-    const found = data.seeds.find(s => s.title === 'Carteira Teste Bitcoin');
-    assert(found, 'Seed "Carteira Teste Bitcoin" não encontrada');
-    assert(
-      found.seedPhrase === 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
-      `Seed descriptografada incorreta: "${found.seedPhrase}"`
-    );
+  await test('deletar a seed', async () => {
+    const { status } = await api(`/api/seeds/${seedId}`, { method: 'DELETE', token });
+    assert(status === 200, `veio ${status}`);
+    const { data } = await api('/api/seeds', { token });
+    assert(data.seeds.length === 0, 'deveria estar vazio');
   });
 
-  // ── Resultado ────────────────────────────────────────────
-  console.log('\n╔══════════════════════════════════════════╗');
-  console.log(`║  ✅ Passaram: ${String(passed).padEnd(28)}║`);
-  console.log(`║  ❌ Falharam: ${String(failed).padEnd(28)}║`);
-  console.log('╚══════════════════════════════════════════╝\n');
+  await test('RECUPERAÇÃO pelo código → redefine senha → login novo', async () => {
+    const { data: rp } = await api(`/api/auth/recovery-params?email=${encodeURIComponent(email)}`);
+    const r = await Vault.deriveRecovery(reg.recoveryCode, rp.kdfSaltRc);
+    const { status: vs, data: vd } = await api('/api/auth/recover/verify', { method: 'POST', body: { email, recAuthKey: r.recAuthKey } });
+    assert(vs === 200 && vd.recoveryToken, `verify ${vs}`);
+    const dekRec = await Vault.unwrapDek(r.kek, vd.wrappedDekRc);
+    assert(eqBytes(dekRec, reg.dek), 'DEK recuperada não bateu');
 
-  if (failed > 0) process.exit(1);
-}
+    const reset = await Vault.buildPasswordReset('NovaSenha456!', dekRec);
+    const { status: cs } = await api('/api/auth/recover/commit', { method: 'POST', body: { recoveryToken: vd.recoveryToken, newAuthKey: reset.authKey, newKdfSalt: reset.kdfSalt, newWrappedDekPw: reset.wrappedDekPw } });
+    assert(cs === 200, `commit ${cs}`);
 
-runTests().catch(err => {
-  console.error('\n❌ Erro fatal nos testes:', err.message);
-  process.exit(1);
-});
+    const d2 = await Vault.deriveLogin('NovaSenha456!', await saltOf());
+    const { status: ls, data: ld } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d2.authKey, totpCode: totp(totpSecret) } });
+    assert(ls === 200, `login nova senha ${ls}`);
+    const dek2 = await Vault.unwrapDek(d2.kek, ld.wrappedDekPw);
+    assert(eqBytes(dek2, reg.dek), 'DEK após reset não bateu');
+  });
+
+  console.log(`\n${'='.repeat(40)}\n  ✅ Passaram: ${pass}    ❌ Falharam: ${fail}\n${'='.repeat(40)}\n`);
+  process.exit(fail > 0 ? 1 : 0);
+})().catch(e => { console.error('FATAL:', e); process.exit(1); });
