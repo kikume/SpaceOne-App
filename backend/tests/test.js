@@ -47,6 +47,17 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
     totpSecret = data.totpSecret;
   });
 
+  await test('cadastro duplicado do mesmo email → 409', async () => {
+    const { status } = await api('/api/auth/register', { method: 'POST', body: reg.payload });
+    assert(status === 409, `veio ${status}`);
+  });
+
+  await test('login de email inexistente → 401 (não 500)', async () => {
+    const d = await Vault.deriveLogin('qualquer', 'AAAAAAAAAAAAAAAAAAAAAA==');
+    const { status } = await api('/api/auth/login', { method: 'POST', body: { email: `naoexiste_${Date.now()}@x.com`, authKey: d.authKey, totpCode: '123456' } });
+    assert(status === 401, `veio ${status}`);
+  });
+
   await test('login com SENHA errada → 401', async () => {
     const d = await Vault.deriveLogin('senhaErrada!', await saltOf());
     const { status } = await api('/api/auth/login', { method: 'POST', body: { email, authKey: d.authKey, totpCode: totp(totpSecret) } });

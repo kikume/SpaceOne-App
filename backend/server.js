@@ -14,8 +14,10 @@ app.use(helmet());
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(express.json({ limit: '64kb' }));
 
-const authLimiter    = rateLimit({ windowMs: 15 * 60 * 1000, max: 30,  message: { error: 'Muitas tentativas. Aguarde 15 minutos.' } });
-const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Muitas requisições. Aguarde um momento.' } });
+// Generoso em desenvolvimento (para não atrapalhar testes); estrito em produção.
+const isProd = process.env.NODE_ENV === 'production';
+const authLimiter    = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 60  : 5000, message: { error: 'Muitas tentativas. Aguarde 15 minutos.' } });
+const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 300 : 5000, message: { error: 'Muitas requisições. Aguarde um momento.' } });
 
 app.use('/api/auth',  authLimiter,    authRoutes);
 app.use('/api/seeds', generalLimiter, seedsRoutes);
