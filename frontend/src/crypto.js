@@ -15,6 +15,7 @@
  *   - O servidor guarda: authKey-bcrypt, salts (não-secretos) e as duas
  *     cópias EMBRULHADAS da DEK. Sozinho, ele não descriptografa nada.
  * ============================================================ */
+/* global globalThis */
 
 const SUBTLE = () => globalThis.crypto.subtle;
 const RAND   = (n) => globalThis.crypto.getRandomValues(new Uint8Array(n));
