@@ -1,0 +1,38 @@
+# ============================================================
+# Render Blueprint — CryptoVault (backend API + PostgreSQL)
+# Como usar: render.com → New + → Blueprint → conecte este repositório.
+# O Render lê este arquivo, cria o banco e o serviço, e pede os 3 segredos
+# marcados como "sync: false" (você cola os valores que eu te passei).
+# ============================================================
+databases:
+  - name: cryptovault-db
+    databaseName: cryptovault
+    user: cryptovault
+    plan: free          # grátis p/ começar (limitações: ver DEPLOY.md). Paga: 'basic-256mb'.
+    region: oregon
+
+services:
+  - type: web
+    name: cryptovault-api
+    runtime: node
+    rootDir: backend     # o backend fica na subpasta backend/
+    plan: free           # grátis (dorme após inatividade). Paga: 'starter'.
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cryptovault-db
+          property: connectionString
+      # Os 3 segredos abaixo: o Render vai pedir pra você colar no deploy.
+      # GUARDE-OS num lugar seguro — perder o TOTP_ENC_KEY tranca o 2FA de todos.
+      - key: JWT_SECRET
+        sync: false
+      - key: TOTP_ENC_KEY
+        sync: false
+      - key: PARAMS_PEPPER
+        sync: false
