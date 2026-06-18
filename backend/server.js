@@ -3,6 +3,8 @@ const express   = require('express');
 const cors      = require('cors');
 const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path      = require('path');
+const fs        = require('fs');
 const { initDB } = require('./db');
 
 const authRoutes    = require('./routes/auth');
@@ -36,7 +38,25 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'CryptoVault API', model: 'zero-knowledge', timestamp: new Date().toISOString() });
 });
 
-app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
+// API 404
+app.use('/api', (req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
+
+// Serve o frontend React (gerado por npm run build)
+const publicDir = path.join(__dirname, 'public');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir, {
+    maxAge: '1y',
+    immutable: true,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }));
+  // SPA fallback — qualquer rota desconhecida devolve index.html
+  app.get('*', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
+}
+
 app.use((err, req, res, next) => {
   console.error('Erro não tratado:', err);
   res.status(500).json({ error: 'Erro interno do servidor' });

@@ -15,10 +15,10 @@ services:
   - type: web
     name: cryptovault-api
     runtime: node
-    rootDir: backend     # o backend fica na subpasta backend/
-    plan: free           # grátis (dorme após inatividade). Paga: 'starter'.
+    rootDir: backend
+    plan: free
     region: oregon
-    buildCommand: npm install
+    buildCommand: cd ../frontend && npm ci && npm run build && cp -r build ../backend/public && cd ../backend && npm install
     startCommand: node server.js
     healthCheckPath: /health
     envVars:

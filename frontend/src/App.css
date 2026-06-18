@@ -676,3 +676,13 @@ body {
 .cv-btn-icon-sm:hover { color: var(--primary); border-color: var(--primary-mid); background: var(--primary-dim); }
 .cv-btn-icon-sm svg { width: 15px; height: 15px; }
 .cv-btn-pay-wallet { width: 100%; margin-top: 4px; justify-content: center; }
+
+/* ── Badge offline ───────────────────────────────────────── */
+.cv-badge-offline {
+  font-size: 11px; font-weight: 600;
+  color: var(--amber); padding: 4px 10px;
+  background: var(--amber-dim);
+  border: 1px solid var(--amber-border);
+  border-radius: 20px; letter-spacing: .02em;
+  white-space: nowrap;
+}

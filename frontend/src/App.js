@@ -4,7 +4,7 @@ import DeviceLock from './deviceLock';
 import * as BioNative from './biometricNative';
 import './App.css';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+const API_URL = process.env.REACT_APP_API_URL || '';
 
 // ── Ícones inline (sem dependência externa) ──────────────────
 const Icon = {
@@ -61,6 +61,9 @@ export default function App() {
   const [gatePin, setGatePin]   = useState('');
   const [promptedPin, setPromptedPin] = useState(false);
 
+  // ── Modo offline ─────────────────────────────────────────
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
   // ── Pagamento (acesso vitalício) ─────────────────────────
   const [payInfo, setPayInfo]   = useState(null);
   const [payQr, setPayQr]       = useState(null);
@@ -76,6 +79,14 @@ export default function App() {
   useEffect(() => {
     BioNative.isAvailable().then(setBioAvailable).catch(() => {});
     if (DeviceLock.isEnabled() && !auth) setView('unlock');
+    const goOnline  = () => setIsOffline(false);
+    const goOffline = () => setIsOffline(true);
+    window.addEventListener('online',  goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online',  goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
     // eslint-disable-next-line
   }, []);
 
@@ -253,6 +264,8 @@ export default function App() {
     setLoading(true);
     try {
       const data = await apiFetch('/api/seeds');
+      // Guarda blobs cifrados em cache local para acesso offline
+      try { localStorage.setItem('cv_blobs_cache', JSON.stringify(data.seeds || [])); } catch {}
       const decrypted = await Promise.all((data.seeds || []).map(async (s) => {
         try {
           const o = await Vault.decryptSeed(dek, s.blob);
@@ -261,8 +274,27 @@ export default function App() {
           return { id: s.id, title: '⚠️ Falha ao decifrar', seedPhrase: '', timestamp: s.timestamp, broken: true };
         }
       }));
+      setIsOffline(false);
       setSeeds(decrypted);
     } catch (err) {
+      // Tenta carregar do cache offline
+      try {
+        const raw = localStorage.getItem('cv_blobs_cache');
+        if (raw && dek) {
+          const cached = JSON.parse(raw);
+          const decrypted = await Promise.all(cached.map(async (s) => {
+            try {
+              const o = await Vault.decryptSeed(dek, s.blob);
+              return { id: s.id, title: o.title, seedPhrase: o.seedPhrase, timestamp: s.timestamp };
+            } catch {
+              return { id: s.id, title: '⚠️ Falha ao decifrar', seedPhrase: '', timestamp: s.timestamp, broken: true };
+            }
+          }));
+          setSeeds(decrypted);
+          setIsOffline(true);
+          return;
+        }
+      } catch {}
       if (/expirada|inválido/i.test(err.message)) handleLogout();
       else setError(err.message);
     } finally {
@@ -306,9 +338,19 @@ export default function App() {
 
   // ── Desbloqueio rápido: abrir o cofre por PIN / biometria ──
   async function openVaultWith(dekBytes, refreshToken) {
-    const data = await apiFetch('/api/auth/device/refresh', { method: 'POST', body: JSON.stringify({ refreshToken }) });
-    setUnlockF({ pin: '' });
-    await gotoVault(data.token, data.email, dekBytes);
+    try {
+      const data = await apiFetch('/api/auth/device/refresh', { method: 'POST', body: JSON.stringify({ refreshToken }) });
+      setUnlockF({ pin: '' });
+      await gotoVault(data.token, data.email, dekBytes);
+    } catch {
+      // Offline: usa email guardado localmente e entra em modo só-leitura
+      const email = DeviceLock.enabledEmail() || '';
+      setUnlockF({ pin: '' });
+      setAuth({ token: '', email });
+      setDek(dekBytes);
+      setIsOffline(true);
+      setView('dashboard');
+    }
   }
 
   // Após autenticar: checa pagamento → vai pro cofre OU pro paywall
@@ -835,9 +877,10 @@ export default function App() {
             <span className="cv-header-name">CryptoVault</span>
           </div>
           <div className="cv-header-right">
+            {isOffline && <span className="cv-badge-offline">● Offline</span>}
             <span className="cv-header-email">{auth.email}</span>
-            <button onClick={() => { setModal({ type: 'devicelock' }); clearMsgs(); }} className="cv-btn-icon" title="Desbloqueio rápido (PIN/biometria)"><Icon.Phone /></button>
-            <button onClick={() => loadSeeds()} className="cv-btn-icon" title="Recarregar" disabled={loading}><Icon.Refresh /></button>
+            <button onClick={() => { setModal({ type: 'devicelock' }); clearMsgs(); }} className="cv-btn-icon" title="Desbloqueio rápido (PIN/biometria)" disabled={isOffline}><Icon.Phone /></button>
+            <button onClick={() => loadSeeds()} className="cv-btn-icon" title="Recarregar" disabled={loading || isOffline}><Icon.Refresh /></button>
             <button onClick={handleLogout} className="cv-btn-icon cv-btn-icon--logout" title="Sair"><Icon.LogOut /></button>
           </div>
         </header>
@@ -849,10 +892,12 @@ export default function App() {
               <p className="cv-dash-sub">
                 {loading && seeds.length === 0
                   ? 'Descriptografando…'
+                  : isOffline
+                  ? `${seeds.length} seed${seeds.length !== 1 ? 's' : ''} em cache local · modo offline`
                   : `${seeds.length} seed${seeds.length !== 1 ? 's' : ''} cifrada${seeds.length !== 1 ? 's' : ''} de ponta a ponta`}
               </p>
             </div>
-            <button onClick={() => { setModal({ type: 'add' }); clearMsgs(); }} className="cv-btn cv-btn-primary">
+            <button onClick={() => { setModal({ type: 'add' }); clearMsgs(); }} className="cv-btn cv-btn-primary" disabled={isOffline} title={isOffline ? 'Sem ligação — ligue-se para guardar seeds' : ''}>
               <Icon.Plus /> Nova Seed
             </button>
           </div>
@@ -965,7 +1010,7 @@ export default function App() {
             {success && <Alert type="success">{success}</Alert>}
 
             <div className="cv-modal-actions">
-              <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" disabled={loading} title="Apagar seed">
+              <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" disabled={loading || isOffline} title="Apagar seed">
                 <Icon.Trash /> Apagar
               </button>
               {showSeed && (
