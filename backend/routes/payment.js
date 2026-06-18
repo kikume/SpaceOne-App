@@ -55,11 +55,28 @@ async function rpc(method, params) {
 }
 
 async function solPriceUsd() {
-  try {
-    const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', { signal: AbortSignal.timeout(8000) });
-    const j = await r.json();
-    return Number(j && j.solana && j.solana.usd) || null;
-  } catch { return null; }
+  const sources = [
+    async () => {
+      const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT', { signal: AbortSignal.timeout(6000) });
+      const j = await r.json(); return Number(j.price) || null;
+    },
+    async () => {
+      const r = await fetch('https://min-api.cryptocompare.com/data/price?fsym=SOL&tsyms=USD', { signal: AbortSignal.timeout(6000) });
+      const j = await r.json(); return Number(j.USD) || null;
+    },
+    async () => {
+      const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', { signal: AbortSignal.timeout(8000) });
+      const j = await r.json(); return Number(j && j.solana && j.solana.usd) || null;
+    },
+    async () => {
+      const r = await fetch('https://www.okx.com/api/v5/market/ticker?instId=SOL-USDT', { signal: AbortSignal.timeout(6000) });
+      const j = await r.json(); return Number(j.data && j.data[0] && j.data[0].last) || null;
+    },
+  ];
+  for (const src of sources) {
+    try { const p = await src(); if (p && p > 1) return p; } catch {}
+  }
+  return null;
 }
 
 /** Confere se a transação `signature` pagou >= $2 (USDC ou SOL) ao PAY_ADDRESS. */
