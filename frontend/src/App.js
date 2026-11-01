@@ -37,8 +37,9 @@ export default function App() {
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
   const [modal, setModal]     = useState(null);     // null | {type:'add'} | {type:'view', seed}
-  const [regResult, setRegResult] = useState(null); // { qrCode, totpSecret, recoveryCode }
+  const [regResult, setRegResult] = useState(null); // { qrCode, totpSecret, recoveryCode, secretKey, setupToken }
   const [savedRecovery, setSavedRecovery] = useState(false);
+  const [totpConfirm, setTotpConfirm]     = useState({ code: '', ok: false });
 
   // ── Formulários ──────────────────────────────────────────
   const [loginF, setLoginF]   = useState({ email: '', password: '', totpCode: '' });
@@ -93,7 +94,9 @@ export default function App() {
   // ── Quando entra no paywall: busca QR code Solana Pay ───────
   useEffect(() => {
     if (view === 'paywall' && auth && !payQr) {
-      apiFetch('/api/payment/qr').then(setPayQr).catch(() => {});
+      apiFetch('/api/payment/qr').then(setPayQr).catch(() => {
+        setError('Não foi possível carregar os dados de pagamento. Verifique sua conexão e recarregue.');
+      });
     }
     // eslint-disable-next-line
   }, [view]);
@@ -124,7 +127,12 @@ export default function App() {
     };
     const res  = await fetch(`${API_URL}${path}`, { ...opts, headers });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Erro de comunicação com o servidor');
+    if (!res.ok) {
+      const err = new Error(data.error || 'Erro de comunicação com o servidor');
+      err.code = data.code;
+      err.status = res.status;
+      throw err;
+    }
     return data;
   }
 
@@ -133,6 +141,8 @@ export default function App() {
     setDek(null);
     setSeeds([]);
     setModal(null);
+    setPayInfo(null);
+    setPayQr(null);
     goTo('login');
   }
 
@@ -170,8 +180,9 @@ export default function App() {
       // Guarda a Chave-Secreta neste aparelho para login automático nas próximas vezes
       try { localStorage.setItem('cv_sk_' + regF.email.trim().toLowerCase(), reg.secretKey); } catch {}
       const data = await apiFetch('/api/auth/register', { method: 'POST', body: JSON.stringify(reg.payload) });
-      setRegResult({ qrCode: data.qrCode, totpSecret: data.totpSecret, recoveryCode: reg.recoveryCode, secretKey: reg.secretKey });
+      setRegResult({ qrCode: data.qrCode, totpSecret: data.totpSecret, recoveryCode: reg.recoveryCode, secretKey: reg.secretKey, setupToken: data.setupToken });
       setSavedRecovery(false);
+      setTotpConfirm({ code: '', ok: false });
       setRegF({ email: '', password: '', confirm: '' });
       setView('qrcode');
     } catch (err) {
@@ -224,6 +235,26 @@ export default function App() {
     }
   }
 
+  // ── Confirma o 2FA antes de concluir o cadastro (evita conta trancada) ──
+  async function handleConfirmTotp(e) {
+    e.preventDefault();
+    clearMsgs();
+    if (totpConfirm.code.length !== 6) return setError('Digite os 6 dígitos do app autenticador');
+    setLoading(true);
+    try {
+      await apiFetch('/api/auth/register/verify-totp', {
+        method: 'POST',
+        body: JSON.stringify({ setupToken: regResult.setupToken, totpCode: totpConfirm.code }),
+      });
+      setTotpConfirm(p => ({ ...p, ok: true }));
+      showSuccess('✅ 2FA confirmado — seu autenticador está funcionando!');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // ── Recuperação: usa o código de recuperação para redefinir a senha ──
   async function handleRecover(e) {
     e.preventDefault();
@@ -248,6 +279,9 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify({ recoveryToken: v.recoveryToken, newAuthKey: reset.authKey, newKdfSalt: reset.kdfSalt, newWrappedDekPw: reset.wrappedDekPw }),
       });
+      // Guarda a Chave-Secreta usada no reset: a nova senha foi atrelada a ELA.
+      // Sem isto, o próximo login neste aparelho usaria uma chave antiga e falharia.
+      try { localStorage.setItem('cv_sk_' + recF.email.trim().toLowerCase(), recF.secretKey.trim()); } catch {}
       setRecF({ email: '', recoveryCode: '', secretKey: '', newPassword: '', confirm: '' });
       goTo('login');
       showSuccess('✅ Senha redefinida! Entre com a nova senha.');
@@ -315,6 +349,11 @@ export default function App() {
       showSuccess('🔒 Seed cifrada e salva com segurança');
       loadSeeds();
     } catch (err) {
+      if (err.code === 'PAYMENT_REQUIRED') {
+        setModal(null);
+        goTo('paywall');
+        return;
+      }
       setError(err.message);
     } finally {
       setLoading(false);
@@ -418,7 +457,7 @@ export default function App() {
   async function handleEnableDeviceLock(e) {
     e.preventDefault();
     clearMsgs();
-    if (!/^\d{4}$/.test(pinSetup.pin)) return setError('O PIN deve ter 4 dígitos');
+    if (!/^\d{4,8}$/.test(pinSetup.pin)) return setError('O PIN deve ter de 4 a 8 dígitos');
     if (pinSetup.pin !== pinSetup.confirm) return setError('Os PINs não coincidem');
     setLoading(true);
     try {
@@ -656,6 +695,25 @@ export default function App() {
             <small>Clique para copiar</small>
           </div>
 
+          {/* CONFIRMAÇÃO DO 2FA — garante que o autenticador funciona antes de sair da tela */}
+          <div className="cv-recovery-box">
+            <div className="cv-recovery-head"><Icon.Check /> <strong>Confirme o 2FA</strong></div>
+            {totpConfirm.ok ? (
+              <Alert type="success">✅ Autenticador confirmado — você já consegue gerar códigos de login.</Alert>
+            ) : (
+              <form onSubmit={handleConfirmTotp} className="cv-form" noValidate>
+                <Field label="Digite o código de 6 dígitos que aparece no app">
+                  <input type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="000000" maxLength={6} className="cv-input-mono"
+                    value={totpConfirm.code}
+                    onChange={e => setTotpConfirm(p => ({ ...p, code: e.target.value.replace(/\D/g, '').slice(0, 6) }))} />
+                </Field>
+                <button type="submit" className="cv-btn cv-btn-ghost" disabled={loading}>
+                  {loading ? <Spinner /> : <><Icon.Check /> Confirmar código</>}
+                </button>
+              </form>
+            )}
+          </div>
+
           {/* CHAVE-SECRETA — crítico */}
           <div className="cv-recovery-box">
             <div className="cv-recovery-head"><Icon.Key /> <strong>Sua Chave-Secreta</strong></div>
@@ -680,10 +738,14 @@ export default function App() {
             </label>
           </div>
 
+          {error   && <Alert type="error">{error}</Alert>}
+          {success && <Alert type="success">{success}</Alert>}
+
           <button
             onClick={() => { setRegResult(null); goTo('login'); }}
             className="cv-btn cv-btn-primary"
-            disabled={!savedRecovery}
+            disabled={!savedRecovery || !totpConfirm.ok}
+            title={!totpConfirm.ok ? 'Confirme o código 2FA acima antes de concluir' : (!savedRecovery ? 'Confirme que salvou os códigos' : '')}
           >
             <Icon.Check /> Concluir — Ir para Login
           </button>
@@ -773,9 +835,9 @@ export default function App() {
             <Field label="PIN">
               <input
                 type="password" inputMode="numeric" autoComplete="off" autoFocus
-                className="cv-input-pin" placeholder="••••" maxLength={4}
+                className="cv-input-pin" placeholder="••••" maxLength={8}
                 value={unlockF.pin}
-                onChange={e => setUnlockF({ pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                onChange={e => setUnlockF({ pin: e.target.value.replace(/\D/g, '').slice(0, 8) })}
               />
             </Field>
 
@@ -803,12 +865,14 @@ export default function App() {
   // TELA: PAYWALL (pagamento único para liberar)
   // ════════════════════════════════════════════════════════
   if (view === 'paywall' && auth) {
-    const price   = (payInfo && payInfo.priceUsd) || 2;
-    const address = (payInfo && payInfo.address)  || 'EPsQUSysoDn9FGyUvCDvypn2hSkCPERzszYeUyHyqaAs';
-    const USDC    = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-    const solanaUri = `solana:${address}?amount=${price}&spl-token=${USDC}&label=CryptoVault&message=Acesso%20vitalicio`;
+    // Endereço e URI vêm SEMPRE do servidor — nunca de um fallback local,
+    // para não haver risco de pagamento a um endereço que a API não reconhece.
+    const price     = (payQr && payQr.price)   || (payInfo && payInfo.priceUsd) || 2;
+    const address   = (payQr && payQr.address) || (payInfo && payInfo.address)  || null;
+    const solanaUri = (payQr && payQr.uri) || null;
 
     function openWallet() {
+      if (!solanaUri) return;
       try { window.open(solanaUri, '_system'); } catch { window.location.href = solanaUri; }
     }
 
@@ -830,14 +894,14 @@ export default function App() {
             <p className="cv-pay-scan">Escaneie com Phantom, Solflare ou qualquer carteira Solana</p>
 
             <div className="cv-pay-addr-row">
-              <code className="cv-pay-addr">{address}</code>
-              <button type="button" className="cv-btn-icon-sm" onClick={() => copyText(address)} title="Copiar endereço">
+              <code className="cv-pay-addr">{address || 'Carregando endereço…'}</code>
+              <button type="button" className="cv-btn-icon-sm" onClick={() => address && copyText(address)} title="Copiar endereço" disabled={!address}>
                 {copied ? <Icon.Check /> : <Icon.Copy />}
               </button>
             </div>
             <small className="cv-hint">{copied ? '✅ Endereço copiado!' : `Toque para copiar · USDC · $${price}`}</small>
 
-            <button type="button" className="cv-btn cv-btn-primary cv-btn-pay-wallet" onClick={openWallet}>
+            <button type="button" className="cv-btn cv-btn-primary cv-btn-pay-wallet" onClick={openWallet} disabled={!solanaUri}>
               <Icon.Key /> Abrir carteira Solana
             </button>
           </div>
@@ -1034,9 +1098,9 @@ export default function App() {
             </div>
             <form onSubmit={handleGatePin}>
               <Field label="PIN">
-                <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••" maxLength={4}
+                <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••" maxLength={8}
                   value={gatePin}
-                  onChange={e => setGatePin(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+                  onChange={e => setGatePin(e.target.value.replace(/\D/g, '').slice(0, 8))} />
               </Field>
               {error && <Alert type="error">{error}</Alert>}
               <div className="cv-modal-actions">
@@ -1076,15 +1140,15 @@ export default function App() {
                 <Alert type="warning">
                   ⚠️ Guarda uma cópia <strong>cifrada</strong> da chave neste aparelho, protegida pelo PIN. Conveniência com algum risco — ative só em aparelhos seus. Após 5 PINs errados, apaga sozinho.
                 </Alert>
-                <Field label="Criar PIN (4 dígitos)">
-                  <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••" maxLength={4}
+                <Field label="Criar PIN (4 a 8 dígitos — 6+ recomendado)">
+                  <input type="password" inputMode="numeric" autoFocus className="cv-input-pin" placeholder="••••••" maxLength={8}
                     value={pinSetup.pin}
-                    onChange={e => setPinSetup(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))} />
+                    onChange={e => setPinSetup(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 8) }))} />
                 </Field>
                 <Field label="Confirmar PIN">
-                  <input type="password" inputMode="numeric" className="cv-input-pin" placeholder="••••" maxLength={4}
+                  <input type="password" inputMode="numeric" className="cv-input-pin" placeholder="••••••" maxLength={8}
                     value={pinSetup.confirm}
-                    onChange={e => setPinSetup(p => ({ ...p, confirm: e.target.value.replace(/\D/g, '').slice(0, 4) }))} />
+                    onChange={e => setPinSetup(p => ({ ...p, confirm: e.target.value.replace(/\D/g, '').slice(0, 8) }))} />
                 </Field>
                 {bioAvailable && (
                   <label className="cv-checkbox">

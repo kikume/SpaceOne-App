@@ -13,6 +13,23 @@ const paymentRoutes = require('./routes/payment');
 
 const app = express();
 
+const isProd = process.env.NODE_ENV === 'production';
+
+// Validação de ambiente: falhar no boot é melhor que falhar com usuário dentro.
+if (isProd) {
+  const missing = [];
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) missing.push('JWT_SECRET (mínimo 32 chars)');
+  if (!/^[0-9a-f]{64}$/i.test(process.env.TOTP_ENC_KEY || ''))       missing.push('TOTP_ENC_KEY (32 bytes em hex = 64 chars)');
+  if (!process.env.PARAMS_PEPPER)                                    missing.push('PARAMS_PEPPER');
+  if (!process.env.DATABASE_URL)                                     missing.push('DATABASE_URL');
+  if (missing.length) {
+    console.error('❌ Variáveis de ambiente ausentes/inválidas:\n  - ' + missing.join('\n  - '));
+    process.exit(1);
+  }
+  // Atrás do proxy do Render/Netlify: necessário para o rate-limit ver o IP real
+  app.set('trust proxy', 1);
+}
+
 app.use(helmet());
 // Origens permitidas: web (dev) + apps nativos Capacitor (Android/iOS)
 const allowedOrigins = [
@@ -26,9 +43,8 @@ app.use(cors({
 app.use(express.json({ limit: '64kb' }));
 
 // Generoso em desenvolvimento (para não atrapalhar testes); estrito em produção.
-const isProd = process.env.NODE_ENV === 'production';
-const authLimiter    = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 60  : 5000, message: { error: 'Muitas tentativas. Aguarde 15 minutos.' } });
-const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 300 : 5000, message: { error: 'Muitas requisições. Aguarde um momento.' } });
+const authLimiter    = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 60  : 5000, standardHeaders: true, legacyHeaders: false, message: { error: 'Muitas tentativas. Aguarde 15 minutos.' } });
+const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: isProd ? 300 : 5000, standardHeaders: true, legacyHeaders: false, message: { error: 'Muitas requisições. Aguarde um momento.' } });
 
 app.use('/api/auth',    authLimiter,    authRoutes);
 app.use('/api/seeds',   generalLimiter, seedsRoutes);

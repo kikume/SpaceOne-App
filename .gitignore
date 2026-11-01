@@ -17,6 +17,7 @@ pgsql.zip
 # Builds
 build/
 dist/
+backend/public/
 
 # Toolchain Android portátil (enorme, específico da máquina — NÃO versionar)
 android-tools/

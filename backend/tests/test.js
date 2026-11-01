@@ -32,7 +32,7 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
 
 (async () => {
   console.log(`\n🧪 CryptoVault E2E — ${email}\n`);
-  let reg, totpSecret, token, dek, seedId;
+  let reg, totpSecret, setupToken, token, dek, seedId;
 
   await test('health', async () => {
     const { status, data } = await api('/health');
@@ -44,13 +44,27 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
     assert(!JSON.stringify(reg.payload).includes(password), 'payload vazou a senha!');
     const { status, data } = await api('/api/auth/register', { method: 'POST', body: reg.payload });
     assert(status === 201, `status ${status} ${data.error || ''}`);
-    assert(data.qrCode && data.totpSecret, 'faltou qrCode/totpSecret');
+    assert(data.qrCode && data.totpSecret && data.setupToken, 'faltou qrCode/totpSecret/setupToken');
     totpSecret = data.totpSecret;
+    setupToken = data.setupToken;
   });
 
-  await test('cadastro duplicado do mesmo email → 409', async () => {
-    const { status } = await api('/api/auth/register', { method: 'POST', body: reg.payload });
-    assert(status === 409, `veio ${status}`);
+  await test('re-cadastro de conta VAZIA (2FA abandonado) → recomeça (201)', async () => {
+    const { status, data } = await api('/api/auth/register', { method: 'POST', body: reg.payload });
+    assert(status === 201, `veio ${status}`);
+    assert(data.totpSecret && data.setupToken, 'faltou totpSecret/setupToken no re-cadastro');
+    totpSecret = data.totpSecret; // o segredo 2FA é regenerado
+    setupToken = data.setupToken;
+  });
+
+  await test('register/verify-totp com código ERRADO → 401', async () => {
+    const { status } = await api('/api/auth/register/verify-totp', { method: 'POST', body: { setupToken, totpCode: '000000' } });
+    assert(status === 401, `veio ${status}`);
+  });
+
+  await test('register/verify-totp com código certo → ok', async () => {
+    const { status, data } = await api('/api/auth/register/verify-totp', { method: 'POST', body: { setupToken, totpCode: totp(totpSecret) } });
+    assert(status === 200 && data.ok === true, `veio ${status}`);
   });
 
   await test('login de email inexistente → 401 (não 500)', async () => {
@@ -99,6 +113,11 @@ const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
     await pool.query('UPDATE users SET paid = TRUE WHERE email = $1', [email]);
     const s2 = await api('/api/payment/status', { token });
     assert(s2.data.paid === true, 'após liberar, status deveria ser pago');
+  });
+
+  await test('re-cadastro de conta PAGA/usada → 409 (não sobrescreve)', async () => {
+    const { status } = await api('/api/auth/register', { method: 'POST', body: reg.payload });
+    assert(status === 409, `veio ${status}`);
   });
 
   await test('salvar seed (cifrada no cliente, blob não vaza)', async () => {

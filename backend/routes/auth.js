@@ -27,38 +27,92 @@ router.post('/register', async (req, res) => {
   if (!email || !authKey || !recAuthKey || !kdfSalt || !kdfSaltRc || !wrappedDekPw || !wrappedDekRc) {
     return res.status(400).json({ error: 'Dados de cadastro incompletos' });
   }
-  if (!EMAIL_RE.test(email))      return res.status(400).json({ error: 'Email inválido' });
+  if (!EMAIL_RE.test(email) || email.length > 255) return res.status(400).json({ error: 'Email inválido' });
   if (!HEX64_RE.test(authKey) || !HEX64_RE.test(recAuthKey)) {
     return res.status(400).json({ error: 'Material de autenticação inválido' });
   }
+  if ([kdfSalt, kdfSaltRc].some(s => typeof s !== 'string' || s.length > 64) ||
+      [wrappedDekPw, wrappedDekRc].some(s => typeof s !== 'string' || s.length > 512)) {
+    return res.status(400).json({ error: 'Material de cadastro inválido' });
+  }
 
   try {
-    const exists = await pool.query('SELECT id FROM users WHERE email = $1', [norm(email)]);
-    if (exists.rows.length > 0) {
-      return res.status(409).json({ error: 'Este email já está cadastrado' });
-    }
-
+    const totp = speakeasy.generateSecret({ name: `CryptoVault (${norm(email)})`, issuer: 'CryptoVault', length: 32 });
+    const totpEnc = encryptAtRest(totp.base32);
     const authHash    = await bcrypt.hash(authKey, 12);
     const recAuthHash = await bcrypt.hash(recAuthKey, 12);
 
-    const totp = speakeasy.generateSecret({ name: `CryptoVault (${norm(email)})`, issuer: 'CryptoVault', length: 32 });
-    const totpEnc = encryptAtRest(totp.base32);
-
-    await pool.query(
-      `INSERT INTO users
-        (email, auth_hash, rec_auth_hash, kdf_salt, kdf_salt_rc, wrapped_dek_pw, wrapped_dek_rc, totp_secret_enc)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [norm(email), authHash, recAuthHash, kdfSalt, kdfSaltRc, wrappedDekPw, wrappedDekRc, totpEnc]
-    );
+    const exists = await pool.query('SELECT id, paid FROM users WHERE email = $1', [norm(email)]);
+    let userId;
+    if (exists.rows.length > 0) {
+      // Conta já existe. Se for uma conta VAZIA (nenhuma seed, não paga) —
+      // tipicamente um cadastro abandonado antes de configurar o 2FA —
+      // permitimos recomeçar do zero. Nada é perdido: não havia dados, e o
+      // "dono" anterior não conseguiria entrar de qualquer forma.
+      const u = exists.rows[0];
+      const s = await pool.query('SELECT 1 FROM seeds WHERE user_id = $1 LIMIT 1', [u.id]);
+      if (u.paid || s.rows.length > 0) {
+        return res.status(409).json({ error: 'Este email já está cadastrado' });
+      }
+      await pool.query(
+        `UPDATE users SET auth_hash=$1, rec_auth_hash=$2, kdf_salt=$3, kdf_salt_rc=$4,
+                wrapped_dek_pw=$5, wrapped_dek_rc=$6, totp_secret_enc=$7, created_at=NOW()
+          WHERE id = $8`,
+        [authHash, recAuthHash, kdfSalt, kdfSaltRc, wrappedDekPw, wrappedDekRc, totpEnc, u.id]
+      );
+      await pool.query('DELETE FROM device_tokens WHERE user_id = $1', [u.id]);
+      userId = u.id;
+    } else {
+      const ins = await pool.query(
+        `INSERT INTO users
+          (email, auth_hash, rec_auth_hash, kdf_salt, kdf_salt_rc, wrapped_dek_pw, wrapped_dek_rc, totp_secret_enc)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [norm(email), authHash, recAuthHash, kdfSalt, kdfSaltRc, wrappedDekPw, wrappedDekRc, totpEnc]
+      );
+      userId = ins.rows[0].id;
+    }
 
     const qrCode = await QRCode.toDataURL(totp.otpauth_url, { width: 300, margin: 2 });
 
+    // setupToken: permite confirmar o 2FA logo após o cadastro, sem login.
+    const setupToken = jwt.sign({ userId, purpose: 'totp-setup' }, process.env.JWT_SECRET, { expiresIn: '15m' });
+
     // totpSecret é a MESMA informação contida no QR — devolvida ao próprio
     // dono para entrada manual caso não consiga escanear.
-    res.status(201).json({ message: 'Conta criada. Configure o 2FA.', qrCode, totpSecret: totp.base32 });
+    res.status(201).json({ message: 'Conta criada. Configure o 2FA.', qrCode, totpSecret: totp.base32, setupToken });
   } catch (err) {
     console.error('register:', err);
     res.status(500).json({ error: 'Erro ao criar conta' });
+  }
+});
+
+// ── POST /register/verify-totp ───────────────────────────────
+// Confirma que o app autenticador do usuário gera códigos válidos ANTES
+// de ele sair da tela de cadastro — evita contas trancadas por 2FA
+// nunca configurado.
+router.post('/register/verify-totp', async (req, res) => {
+  const { setupToken, totpCode } = req.body || {};
+  if (!setupToken || !totpCode) return res.status(400).json({ error: 'Dados incompletos' });
+  try {
+    let payload;
+    try { payload = jwt.verify(setupToken, process.env.JWT_SECRET); }
+    catch { return res.status(401).json({ error: 'Sessão de configuração expirada — faça o cadastro novamente' }); }
+    if (payload.purpose !== 'totp-setup') return res.status(401).json({ error: 'Token inválido' });
+
+    const r = await pool.query('SELECT totp_secret_enc FROM users WHERE id = $1', [payload.userId]);
+    if (r.rows.length === 0) return res.status(401).json({ error: 'Conta não encontrada' });
+
+    const ok = speakeasy.totp.verify({
+      secret: decryptAtRest(r.rows[0].totp_secret_enc),
+      encoding: 'base32',
+      token: String(totpCode).replace(/\s/g, ''),
+      window: 1,
+    });
+    if (!ok) return res.status(401).json({ error: 'Código incorreto — confira o app autenticador e tente de novo' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('register/verify-totp:', err);
+    res.status(500).json({ error: 'Erro ao verificar o código' });
   }
 });
 
@@ -152,6 +206,10 @@ router.post('/recover/commit', async (req, res) => {
     return res.status(400).json({ error: 'Dados incompletos' });
   }
   if (!HEX64_RE.test(newAuthKey)) return res.status(400).json({ error: 'Material de autenticação inválido' });
+  if (typeof newKdfSalt !== 'string' || newKdfSalt.length > 64 ||
+      typeof newWrappedDekPw !== 'string' || newWrappedDekPw.length > 512) {
+    return res.status(400).json({ error: 'Material de redefinição inválido' });
+  }
   try {
     let payload;
     try { payload = jwt.verify(recoveryToken, process.env.JWT_SECRET); }
