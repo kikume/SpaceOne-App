@@ -4,7 +4,7 @@ const { pool }    = require('../db');
 const QRCode      = require('qrcode');
 
 // Endereço que RECEBE os pagamentos (público — pode ficar no código/env)
-const PAY_ADDRESS = process.env.SOLANA_PAY_ADDRESS || '9Uz7VyeBFmEU8sKnCwFsGC8AczjmLqnxZjQG7Vsm79sZ';
+const PAY_ADDRESS = process.env.SOLANA_PAY_ADDRESS || '2cEFBWjKwDb7thezcW1MfjwE9CBmaytA1R1xLoKtfy8f';
 const RPC         = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const USDC_MINT   = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // USDC na Solana mainnet
 const PRICE_USD   = Number(process.env.PRICE_USD || 2);

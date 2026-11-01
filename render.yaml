@@ -26,7 +26,7 @@ services:
         value: production
       # Pagamento Solana (endereço público que recebe + RPC)
       - key: SOLANA_PAY_ADDRESS
-        value: 9Uz7VyeBFmEU8sKnCwFsGC8AczjmLqnxZjQG7Vsm79sZ
+        value: 2cEFBWjKwDb7thezcW1MfjwE9CBmaytA1R1xLoKtfy8f
       - key: SOLANA_RPC_URL
         value: https://api.mainnet-beta.solana.com
       - key: PRICE_USD
