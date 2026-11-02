@@ -1,8 +1,9 @@
 # SpaceOne — Como rodar
 
-O SpaceOne é um cofre de seed phrases **100% local**: sem conta, sem login,
-sem senha, sem servidor e sem banco de dados. As seeds são cifradas com
-AES-256-GCM e ficam guardadas apenas no dispositivo onde você usa o app.
+O SpaceOne é um cofre de seed phrases **100% local**: sem conta, sem
+servidor e sem banco de dados. No primeiro uso você cria uma **senha do
+cofre** (estilo Phantom); depois, o app só abre com ela. As seeds são
+cifradas com AES-256-GCM e ficam guardadas apenas no dispositivo.
 
 ## Pré-requisito
 
@@ -43,19 +44,24 @@ Como o app é todo local, não há variáveis de ambiente para configurar.
 No cabeçalho do app há dois botões:
 
 - **Exportar backup** — baixa um arquivo `spaceone-backup-AAAA-MM-DD.json`
-  com suas seeds cifradas e a chave do cofre. Guarde-o em local seguro:
-  quem tiver esse arquivo consegue abrir as seeds.
-- **Importar backup** — restaura as seeds de um backup em outro aparelho
-  ou após limpar o navegador.
+  com suas seeds cifradas. O backup **só abre com a senha** que o cofre
+  tinha no momento da exportação.
+- **Importar backup** — restaura as seeds em outro aparelho ou após limpar
+  o navegador (pede a senha do backup).
+
+Há também o botão de **trocar a senha** (engrenagem) e o de **bloquear o
+cofre** no cabeçalho.
 
 ## Segurança — leia isto
 
-- As seeds ficam cifradas (AES-256-GCM) no armazenamento do navegador
-  **deste aparelho**. Nada é enviado para servidor algum.
-- A chave de criptografia também fica no aparelho, portanto **qualquer
-  pessoa com acesso ao seu computador/navegador consegue abrir o app e ver
-  as seeds**. Use o bloqueio de tela do sistema operacional.
+- A senha **não é salva em lugar nenhum**: dela deriva-se uma chave
+  (Argon2id + HKDF) que cifra a chave do cofre. Senha errada simplesmente
+  não decifra nada (autenticação do AES-256-GCM).
+- Se você **esquecer a senha, não há recuperação** — nem nós nem ninguém
+  consegue abrir o cofre. Anote-a em local seguro.
 - Limpar os dados do navegador **apaga o cofre**. Exporte um backup antes.
+- Quem já usava a versão sem senha: ao criar a senha, as seeds existentes
+  são migradas automaticamente e a chave antiga desprotegida é apagada.
 
 ## Estrutura do projeto
 

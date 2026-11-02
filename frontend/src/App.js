@@ -1,9 +1,10 @@
 /* ============================================================
- * SpaceOne — Cofre local de seed phrases
+ * SpaceOne — Cofre local de seed phrases (estilo Phantom)
  *
- * 100% local: sem conta, sem senha, sem servidor. As seeds são
- * cifradas com AES-256-GCM e guardadas apenas neste dispositivo
- * (localStorage). Nada sai do aparelho.
+ * 100% local: sem conta e sem servidor. No primeiro uso você cria
+ * uma senha; depois o app só abre com ela. A senha NUNCA é salva:
+ * dela deriva-se uma chave (Argon2id + HKDF) que embrulha a chave
+ * do cofre (AES-256-GCM). Senha errada = a decifragem falha.
  * ============================================================ */
 import React, { useState, useEffect } from 'react';
 import Vault from './crypto';
@@ -22,6 +23,8 @@ const Icon = {
   Check:   () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,
   Download:() => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
   Upload:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+  LogOut:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+  Gear:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33h.01a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51h.01a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.01a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
 };
 
 function Spinner() {
@@ -29,50 +32,52 @@ function Spinner() {
 }
 
 // ── Armazenamento local ──────────────────────────────────────
-const STORE_KEY = 'spaceone_vault_v1';
-const DEK_KEY   = 'spaceone_dek_v1';
+const STORE_KEY   = 'spaceone_vault_v1';  // seeds cifradas
+const AUTH_KEY    = 'spaceone_auth_v2';   // { kdfSalt, wrappedDek } — a senha nunca é salva
+const LEGACY_DEK  = 'spaceone_dek_v1';    // versão antiga (chave sem senha) — migrada no setup
 
-function b64enc(bytes) { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); }
-function b64dec(str)   { const s = atob(str); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+function b64dec(str) { const s = atob(str); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
 
-/** Chave local do dispositivo: criada no primeiro uso, fica só neste aparelho. */
-function getLocalDek() {
-  let b64 = null;
-  try { b64 = localStorage.getItem(DEK_KEY); } catch {}
-  if (b64) return b64dec(b64);
-  const dek = window.crypto.getRandomValues(new Uint8Array(32));
-  try { localStorage.setItem(DEK_KEY, b64enc(dek)); } catch {}
-  return dek;
-}
-
-function loadStore() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; }
-}
-function saveStore(items) {
-  localStorage.setItem(STORE_KEY, JSON.stringify(items));
-}
+function loadAuth()  { try { return JSON.parse(localStorage.getItem(AUTH_KEY)); } catch { return null; } }
+function saveAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
+function loadStore() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; } }
+function saveStore(items) { localStorage.setItem(STORE_KEY, JSON.stringify(items)); }
 
 function formatDate(ts) {
   try { return new Date(ts).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }); } catch { return ''; }
 }
 
 export default function App() {
-  const [dek]                 = useState(getLocalDek);
-  const [seeds, setSeeds]     = useState([]);      // decifradas, só em memória
-  const [loading, setLoading] = useState(true);
+  // setup (primeira vez) | unlock (pede senha) | vault (aberto)
+  const [view, setView]       = useState(() => (loadAuth() ? 'unlock' : 'setup'));
+  const [dek, setDek]         = useState(null);    // chave do cofre — SÓ em memória
+  const [seeds, setSeeds]     = useState([]);      // decifradas — só em memória
+  const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
-  const [modal, setModal]     = useState(null);    // null | {type:'add'} | {type:'view', seed}
+  const [modal, setModal]     = useState(null);    // {type:'add'|'view'|'changepass'|'importpass'}
   const [seedF, setSeedF]     = useState({ title: '', seedPhrase: '' });
+  const [passF, setPassF]     = useState({ password: '', confirm: '' });
+  const [unlockPass, setUnlockPass] = useState('');
+  const [changeF, setChangeF] = useState({ current: '', password: '', confirm: '' });
+  const [importPass, setImportPass] = useState('');
+  const [showPass, setShowPass] = useState(false);
   const [showSeed, setShowSeed] = useState(false);
   const [copied, setCopied]   = useState(false);
 
-  // ── Carrega e decifra as seeds guardadas neste aparelho ──
+  function clearMsgs() { setError(''); setSuccess(''); }
+  function showSuccess(msg, ms = 4000) {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(''), ms);
+  }
+
+  // ── Com o cofre aberto, decifra as seeds guardadas ────────
   useEffect(() => {
+    if (view !== 'vault' || !dek) return;
     (async () => {
-      const items = loadStore();
+      setLoading(true);
       const out = [];
-      for (const item of items) {
+      for (const item of loadStore()) {
         try {
           const data = await Vault.decryptSeed(dek, item.blob);
           out.push({ id: item.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: item.createdAt });
@@ -84,13 +89,7 @@ export default function App() {
       setLoading(false);
     })();
     // eslint-disable-next-line
-  }, []);
-
-  function clearMsgs() { setError(''); setSuccess(''); }
-  function showSuccess(msg, ms = 4000) {
-    setSuccess(msg);
-    setTimeout(() => setSuccess(''), ms);
-  }
+  }, [view, dek]);
 
   async function copyText(text) {
     try {
@@ -102,15 +101,96 @@ export default function App() {
     }
   }
 
-  // ── Salvar nova seed (cifra e guarda localmente) ──────────
+  // ── Primeira vez: criar a senha do cofre ──────────────────
+  async function handleSetup(e) {
+    e.preventDefault();
+    clearMsgs();
+    if (passF.password.length < 8) { setError('A senha precisa ter pelo menos 8 caracteres.'); return; }
+    if (passF.password !== passF.confirm) { setError('As senhas não conferem.'); return; }
+    setLoading(true);
+    try {
+      // Migração: se existir o cofre antigo (sem senha), reaproveita a chave
+      // dele para que as seeds já salvas continuem abrindo.
+      let legacyDek = null;
+      try {
+        const b64 = localStorage.getItem(LEGACY_DEK);
+        if (b64) legacyDek = b64dec(b64);
+      } catch {}
+      const lock = await Vault.createPasswordLock(passF.password, legacyDek);
+      saveAuth({ kdfSalt: lock.kdfSalt, wrappedDek: lock.wrappedDek, createdAt: new Date().toISOString() });
+      try { localStorage.removeItem(LEGACY_DEK); } catch {} // some com a chave sem proteção
+      setDek(lock.dek);
+      setPassF({ password: '', confirm: '' });
+      setView('vault');
+      showSuccess('🔒 Cofre criado. Guarde bem a sua senha — sem ela não há recuperação.');
+    } catch (err) {
+      setError('Falha ao criar o cofre: ' + (err.message || 'erro desconhecido'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Desbloquear com a senha ───────────────────────────────
+  async function handleUnlock(e) {
+    e.preventDefault();
+    clearMsgs();
+    const auth = loadAuth();
+    if (!auth) { setView('setup'); return; }
+    setLoading(true);
+    try {
+      const opened = await Vault.openPasswordLock(unlockPass, auth.kdfSalt, auth.wrappedDek);
+      setDek(opened);
+      setUnlockPass('');
+      setView('vault');
+    } catch {
+      setError('Senha incorreta.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Bloquear (limpa tudo da memória) ──────────────────────
+  function handleLock() {
+    setDek(null);
+    setSeeds([]);
+    setModal(null);
+    setSeedF({ title: '', seedPhrase: '' });
+    setShowSeed(false);
+    clearMsgs();
+    setView('unlock');
+  }
+
+  // ── Trocar a senha ────────────────────────────────────────
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    clearMsgs();
+    const auth = loadAuth();
+    if (changeF.password.length < 8) { setError('A nova senha precisa ter pelo menos 8 caracteres.'); return; }
+    if (changeF.password !== changeF.confirm) { setError('As novas senhas não conferem.'); return; }
+    setLoading(true);
+    try {
+      // confirma a senha atual antes de trocar
+      await Vault.openPasswordLock(changeF.current, auth.kdfSalt, auth.wrappedDek);
+      const lock = await Vault.createPasswordLock(changeF.password, dek);
+      saveAuth({ ...auth, kdfSalt: lock.kdfSalt, wrappedDek: lock.wrappedDek });
+      setChangeF({ current: '', password: '', confirm: '' });
+      setModal(null);
+      showSuccess('Senha alterada com sucesso.');
+    } catch {
+      setError('Senha atual incorreta.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Salvar nova seed ──────────────────────────────────────
   async function handleSaveSeed(e) {
     e.preventDefault();
     clearMsgs();
     const title = seedF.title.trim();
     const phrase = seedF.seedPhrase.trim().replace(/\s+/g, ' ');
     if (!title || !phrase) return;
-    const words = phrase.split(' ');
-    if (words.length < 3) { setError('A seed phrase parece curta demais. Confira as palavras.'); return; }
+    if (phrase.split(' ').length < 3) { setError('A seed phrase parece curta demais. Confira as palavras.'); return; }
     setLoading(true);
     try {
       const blob = await Vault.encryptSeed(dek, title, phrase);
@@ -140,12 +220,13 @@ export default function App() {
     showSuccess('Seed apagada deste aparelho.');
   }
 
-  // ── Backup: exporta e importa o cofre cifrado ─────────────
+  // ── Backup: exporta cofre cifrado (abre só com a senha) ───
   function handleExport() {
     clearMsgs();
+    const auth = loadAuth();
     const payload = {
-      app: 'SpaceOne', version: 1, exportedAt: new Date().toISOString(),
-      dek: (() => { try { return localStorage.getItem(DEK_KEY); } catch { return null; } })(),
+      app: 'SpaceOne', version: 2, exportedAt: new Date().toISOString(),
+      kdfSalt: auth.kdfSalt, wrappedDek: auth.wrappedDek,
       items: loadStore(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -154,43 +235,155 @@ export default function App() {
     a.download = `spaceone-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
-    showSuccess('Backup exportado. Guarde o arquivo em local seguro — ele permite abrir suas seeds.');
+    showSuccess('Backup exportado. Ele só abre com a senha usada na exportação.');
   }
 
-  async function handleImport(e) {
+  function handleImportFile(e) {
     clearMsgs();
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    try {
-      const payload = JSON.parse(await file.text());
-      if (payload.app !== 'SpaceOne' || !Array.isArray(payload.items) || !payload.dek) {
-        throw new Error('Arquivo de backup inválido');
+    file.text().then(text => {
+      const payload = JSON.parse(text);
+      if (payload.app !== 'SpaceOne' || !Array.isArray(payload.items)) throw new Error('inválido');
+      if (payload.version === 1 && payload.dek) {
+        // backup antigo (sem senha): a chave vem dentro do arquivo
+        doImport(payload, b64dec(payload.dek));
+      } else if (payload.version === 2 && payload.kdfSalt && payload.wrappedDek) {
+        setModal({ type: 'importpass', payload });
+      } else {
+        throw new Error('inválido');
       }
-      const importDek = b64dec(payload.dek);
-      const existing = loadStore();
-      const store = [...existing];
-      const decrypted = [];
-      let added = 0;
+    }).catch(() => setError('Arquivo de backup inválido.'));
+  }
+
+  async function handleImportPass(e) {
+    e.preventDefault();
+    clearMsgs();
+    setLoading(true);
+    try {
+      const { payload } = modal;
+      const importDek = await Vault.openPasswordLock(importPass, payload.kdfSalt, payload.wrappedDek);
+      setImportPass('');
+      setModal(null);
+      await doImport(payload, importDek);
+    } catch {
+      setError('Senha do backup incorreta.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function doImport(payload, importDek) {
+    setLoading(true);
+    try {
+      const store = loadStore();
+      const added = [];
       for (const item of payload.items) {
         if (store.some(i => i.id === item.id)) continue;
-        const data = await Vault.decryptSeed(importDek, item.blob); // valida o backup
-        const blob = await Vault.encryptSeed(dek, data.title, data.seedPhrase); // re-cifra com a chave deste aparelho
+        const data = await Vault.decryptSeed(importDek, item.blob);           // abre com a chave do backup
+        const blob = await Vault.encryptSeed(dek, data.title, data.seedPhrase); // re-cifra com a chave deste cofre
         const newItem = { id: item.id, blob, createdAt: item.createdAt };
         store.push(newItem);
-        decrypted.push({ id: newItem.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: newItem.createdAt });
-        added++;
+        added.push({ id: newItem.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: newItem.createdAt });
       }
       saveStore(store);
-      if (decrypted.length) setSeeds(p => [...decrypted, ...p]);
-      showSuccess(added ? `Backup importado: ${added} seed${added !== 1 ? 's' : ''} restaurada${added !== 1 ? 's' : ''}.` : 'Nada novo para importar — todas as seeds do backup já estão aqui.');
-    } catch (err) {
-      setError('Não foi possível importar o backup: ' + (err.message || 'arquivo inválido'));
+      if (added.length) setSeeds(p => [...added, ...p]);
+      showSuccess(added.length
+        ? `Backup importado: ${added.length} seed${added.length !== 1 ? 's' : ''} restaurada${added.length !== 1 ? 's' : ''}.`
+        : 'Nada novo para importar — todas as seeds do backup já estão aqui.');
+    } catch {
+      setError('Não foi possível importar: o backup está corrompido ou a senha não confere.');
+    } finally {
+      setLoading(false);
     }
   }
 
   // ════════════════════════════════════════════════════════
-  // TELA ÚNICA: COFRE LOCAL
+  // TELA: CRIAR SENHA (primeira vez)
+  // ════════════════════════════════════════════════════════
+  if (view === 'setup') {
+    return (
+      <div className="cv-bg">
+        <div className="cv-card cv-card-auth">
+          <div className="cv-brand">
+            <div className="cv-brand-icon"><Icon.Shield /></div>
+            <h1 className="cv-brand-name">SpaceOne</h1>
+            <p className="cv-brand-sub">Crie a senha do seu cofre. Tudo fica só neste aparelho.</p>
+          </div>
+
+          <form onSubmit={handleSetup} className="cv-form" noValidate>
+            <Field label="Senha do cofre">
+              <div className="cv-input-wrap">
+                <input type={showPass ? 'text' : 'password'} autoComplete="new-password" required autoFocus placeholder="Mínimo 8 caracteres"
+                  value={passF.password}
+                  onChange={e => setPassF(p => ({ ...p, password: e.target.value }))} />
+                <button type="button" className="cv-eye" onClick={() => setShowPass(p => !p)}>
+                  {showPass ? <Icon.EyeOff /> : <Icon.Eye />}
+                </button>
+              </div>
+              <PasswordStrength password={passF.password} />
+            </Field>
+
+            <Field label="Confirmar senha">
+              <input type={showPass ? 'text' : 'password'} autoComplete="new-password" required placeholder="Repita a senha"
+                value={passF.confirm}
+                onChange={e => setPassF(p => ({ ...p, confirm: e.target.value }))} />
+            </Field>
+
+            <Alert type="warning">
+              ⚠️ Sua senha é a <strong>única</strong> chave do cofre e <strong>não é salva em lugar nenhum</strong>. Se esquecê-la, as seeds não poderão ser recuperadas. Anote-a em local seguro.
+            </Alert>
+            {error && <Alert type="error">{error}</Alert>}
+
+            <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+              {loading ? <><Spinner /> Gerando suas chaves…</> : <><Icon.Shield /> Criar cofre</>}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  // TELA: DESBLOQUEAR
+  // ════════════════════════════════════════════════════════
+  if (view === 'unlock') {
+    return (
+      <div className="cv-bg">
+        <div className="cv-card cv-card-auth">
+          <div className="cv-brand">
+            <div className="cv-brand-icon"><Icon.Shield /></div>
+            <h1 className="cv-brand-name">SpaceOne</h1>
+            <p className="cv-brand-sub">Cofre bloqueado. Digite sua senha para entrar.</p>
+          </div>
+
+          <form onSubmit={handleUnlock} className="cv-form" noValidate>
+            <Field label="Senha">
+              <div className="cv-input-wrap">
+                <input type={showPass ? 'text' : 'password'} autoComplete="current-password" required autoFocus placeholder="••••••••"
+                  value={unlockPass}
+                  onChange={e => setUnlockPass(e.target.value)} />
+                <button type="button" className="cv-eye" onClick={() => setShowPass(p => !p)}>
+                  {showPass ? <Icon.EyeOff /> : <Icon.Eye />}
+                </button>
+              </div>
+            </Field>
+
+            {error && <Alert type="error">{error}</Alert>}
+            {success && <Alert type="success">{success}</Alert>}
+
+            <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+              {loading ? <><Spinner /> Verificando…</> : <><Icon.Lock /> Desbloquear</>}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  // TELA: COFRE
   // ════════════════════════════════════════════════════════
   return (
     <div className="cv-dashboard">
@@ -201,11 +394,13 @@ export default function App() {
         </div>
         <div className="cv-header-right">
           <span className="cv-header-email">100% local · nada sai do seu aparelho</span>
+          <button onClick={() => { setModal({ type: 'changepass' }); clearMsgs(); }} className="cv-btn-icon" title="Trocar senha"><Icon.Gear /></button>
           <button onClick={handleExport} className="cv-btn-icon" title="Exportar backup"><Icon.Download /></button>
           <label className="cv-btn-icon" title="Importar backup" style={{ cursor: 'pointer' }}>
             <Icon.Upload />
-            <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImport} />
+            <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImportFile} />
           </label>
+          <button onClick={handleLock} className="cv-btn-icon cv-btn-icon--logout" title="Bloquear cofre"><Icon.LogOut /></button>
         </div>
       </header>
 
@@ -214,8 +409,8 @@ export default function App() {
           <div>
             <h2 className="cv-dash-title">Minhas Seeds</h2>
             <p className="cv-dash-sub">
-              {loading
-                ? 'Abrindo o cofre…'
+              {loading && seeds.length === 0
+                ? 'Decifrando…'
                 : `${seeds.length} seed${seeds.length !== 1 ? 's' : ''} cifrada${seeds.length !== 1 ? 's' : ''} neste aparelho (AES-256)`}
             </p>
           </div>
@@ -235,7 +430,7 @@ export default function App() {
           <div className="cv-state-center cv-empty">
             <div className="cv-empty-icon"><Icon.Key /></div>
             <h3>Nenhuma seed salva ainda</h3>
-            <p>Clique em <strong>Nova Seed</strong> para guardar sua primeira seed phrase. Tudo fica cifrado <strong>somente neste aparelho</strong> — sem conta, sem servidor.</p>
+            <p>Clique em <strong>Nova Seed</strong> para guardar sua primeira seed phrase. Tudo fica cifrado <strong>somente neste aparelho</strong>, protegido pela sua senha.</p>
             <button onClick={() => setModal({ type: 'add' })} className="cv-btn cv-btn-primary"><Icon.Plus /> Salvar primeira seed</button>
           </div>
         )}
@@ -346,6 +541,63 @@ export default function App() {
           </div>
         </Modal>
       )}
+
+      {/* ── Modal: Trocar senha ── */}
+      {modal?.type === 'changepass' && (
+        <Modal onClose={() => { setModal(null); setChangeF({ current: '', password: '', confirm: '' }); clearMsgs(); }}>
+          <div className="cv-modal-header"><h3><Icon.Lock /> Trocar senha do cofre</h3></div>
+          <form onSubmit={handleChangePassword}>
+            <Field label="Senha atual">
+              <input type="password" autoComplete="current-password" required autoFocus placeholder="••••••••"
+                value={changeF.current}
+                onChange={e => setChangeF(p => ({ ...p, current: e.target.value }))} />
+            </Field>
+            <Field label="Nova senha">
+              <input type="password" autoComplete="new-password" required placeholder="Mínimo 8 caracteres"
+                value={changeF.password}
+                onChange={e => setChangeF(p => ({ ...p, password: e.target.value }))} />
+              <PasswordStrength password={changeF.password} />
+            </Field>
+            <Field label="Confirmar nova senha">
+              <input type="password" autoComplete="new-password" required placeholder="Repita a nova senha"
+                value={changeF.confirm}
+                onChange={e => setChangeF(p => ({ ...p, confirm: e.target.value }))} />
+            </Field>
+            <Alert type="warning">⚠️ Backups antigos continuam abrindo com a senha usada quando foram exportados.</Alert>
+            {error && <Alert type="error">{error}</Alert>}
+            <div className="cv-modal-actions">
+              <button type="button" onClick={() => { setModal(null); setChangeF({ current: '', password: '', confirm: '' }); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancelar</button>
+              <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                {loading ? <Spinner /> : <><Icon.Check /> Trocar senha</>}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── Modal: Senha do backup importado ── */}
+      {modal?.type === 'importpass' && (
+        <Modal onClose={() => { setModal(null); setImportPass(''); clearMsgs(); }}>
+          <div className="cv-modal-header">
+            <h3><Icon.Upload /> Importar backup</h3>
+            <p className="cv-modal-date">Digite a senha que o cofre tinha quando este backup foi exportado</p>
+          </div>
+          <form onSubmit={handleImportPass}>
+            <Field label="Senha do backup">
+              <input type="password" autoComplete="off" required autoFocus placeholder="••••••••"
+                value={importPass}
+                onChange={e => setImportPass(e.target.value)} />
+            </Field>
+            {error && <Alert type="error">{error}</Alert>}
+            <div className="cv-modal-actions">
+              <button type="button" onClick={() => { setModal(null); setImportPass(''); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancelar</button>
+              <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                {loading ? <Spinner /> : <><Icon.Check /> Importar</>}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -369,6 +621,28 @@ function Modal({ onClose, children }) {
         </button>
         {children}
       </div>
+    </div>
+  );
+}
+
+function PasswordStrength({ password }) {
+  const checks = [
+    { ok: password.length >= 8,   label: '8+ caracteres' },
+    { ok: /[A-Z]/.test(password), label: 'Maiúscula' },
+    { ok: /[0-9]/.test(password), label: 'Número' },
+    { ok: /[^A-Za-z0-9]/.test(password), label: 'Símbolo' },
+  ];
+  const score = checks.filter(c => c.ok).length;
+  const labels = ['', 'Fraca', 'Razoável', 'Boa', 'Forte'];
+  const colors = ['', '#ef4444', '#f59e0b', '#3b82f6', '#10b981'];
+  return (
+    <div className="cv-pwd-strength">
+      <div className="cv-pwd-bars">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="cv-pwd-bar" style={{ background: i <= score ? colors[score] : 'var(--border)' }} />
+        ))}
+      </div>
+      <span style={{ color: colors[score] }}>{labels[score]}</span>
     </div>
   );
 }

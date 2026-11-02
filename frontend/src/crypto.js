@@ -137,6 +137,25 @@ async function buildPasswordReset(newPassword, dek, secretKey) {
   return { authKey: authKeyHex, kdfSalt: b64enc(salt), wrappedDekPw: await aesEncrypt(kek, dek) };
 }
 
+/* ── Trava local por senha (estilo Phantom) ──────────────────
+ * A senha NUNCA é guardada. Dela deriva-se uma KEK (Argon2id +
+ * HKDF) que embrulha a DEK do cofre. Abrir com a senha errada
+ * falha na autenticação do AES-GCM — não há como "chutar". */
+
+/** Cria a trava: deriva KEK da senha e embrulha a DEK (nova ou existente). */
+async function createPasswordLock(password, existingDek) {
+  const salt = RAND(16);
+  const dek  = existingDek || RAND(32);
+  const { kek } = await deriveFromSecret(password, salt);
+  return { kdfSalt: b64enc(salt), wrappedDek: await aesEncrypt(kek, dek), dek };
+}
+
+/** Abre a trava: senha correta devolve a DEK; errada lança exceção. */
+async function openPasswordLock(password, kdfSaltB64, wrappedDekB64) {
+  const { kek } = await deriveFromSecret(password, b64dec(kdfSaltB64));
+  return aesDecrypt(kek, wrappedDekB64);
+}
+
 /** Cifra uma seed (título + frase) com a DEK. */
 async function encryptSeed(dek, title, seedPhrase) {
   return aesEncrypt(dek, textEnc.encode(JSON.stringify({ title, seedPhrase })));
@@ -149,6 +168,7 @@ async function decryptSeed(dek, blobB64) {
 const Vault = {
   buildRegistration, deriveLogin, unwrapDek, deriveRecovery, buildPasswordReset,
   encryptSeed, decryptSeed, generateRecoveryCode, generateSecretKey,
+  createPasswordLock, openPasswordLock,
 };
 
 module.exports = Vault;
