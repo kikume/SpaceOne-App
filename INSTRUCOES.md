@@ -39,9 +39,20 @@ Gera a pasta `frontend/build/` — arquivos estáticos que podem ser servidos
 por qualquer servidor web (ou hospedados no Netlify/Vercel/GitHub Pages).
 Como o app é todo local, não há variáveis de ambiente para configurar.
 
+## Usar em outro computador
+
+O cofre vive só no aparelho onde foi criado — não existe conta nem
+servidor. Para levá-lo a outro computador:
+
+1. No computador atual: botão **Backup** (cabeçalho) → **Exportar backup**
+2. Leve o arquivo ao outro computador (pendrive, e-mail, nuvem…)
+3. No outro computador: abra o SpaceOne, crie uma senha de cofre e use
+   **Backup → Importar backup**
+4. Digite a senha que o cofre tinha quando o backup foi exportado
+
 ## Backup
 
-No cabeçalho do app há dois botões:
+No botão **Backup** do cabeçalho:
 
 - **Exportar backup** — baixa um arquivo `spaceone-backup-AAAA-MM-DD.json`
   com suas seeds cifradas. O backup **só abre com a senha** que o cofre

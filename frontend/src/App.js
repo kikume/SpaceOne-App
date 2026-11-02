@@ -431,11 +431,9 @@ export default function App() {
         <div className="cv-header-right">
           <span className="cv-header-email">100% local · nada sai do seu aparelho</span>
           <button onClick={() => { setModal({ type: 'changepass' }); clearMsgs(); }} className="cv-btn-icon" title="Trocar senha"><Icon.Gear /></button>
-          <button onClick={handleExport} className="cv-btn-icon" title="Exportar backup"><Icon.Download /></button>
-          <label className="cv-btn-icon" title="Importar backup" style={{ cursor: 'pointer' }}>
-            <Icon.Upload />
-            <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImportFile} />
-          </label>
+          <button onClick={() => { setModal({ type: 'backup' }); clearMsgs(); }} className="cv-btn cv-btn-ghost" style={{ padding: '8px 14px' }} title="Backup e transferência entre computadores">
+            <Icon.Download /> Backup
+          </button>
           <button onClick={handleLock} className="cv-btn-icon cv-btn-icon--logout" title="Bloquear cofre"><Icon.LogOut /></button>
         </div>
       </header>
@@ -646,6 +644,38 @@ export default function App() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* ── Modal: Backup e transferência ── */}
+      {modal?.type === 'backup' && (
+        <Modal onClose={() => { setModal(null); clearMsgs(); }}>
+          <div className="cv-modal-header">
+            <h3><Icon.Download /> Backup e outro computador</h3>
+            <p className="cv-modal-date">Seu cofre vive só neste aparelho — o backup é como ele viaja</p>
+          </div>
+
+          <div className="cv-seed-locked" style={{ textAlign: 'left', marginBottom: 16 }}>
+            <p style={{ marginBottom: 10 }}><strong>Para usar o SpaceOne em outro computador:</strong></p>
+            <p style={{ marginBottom: 6 }}>1. Clique em <strong>Exportar backup</strong> aqui — baixa um arquivo cifrado</p>
+            <p style={{ marginBottom: 6 }}>2. Leve o arquivo ao outro computador (pendrive, e-mail, nuvem…)</p>
+            <p style={{ marginBottom: 6 }}>3. Lá, abra o SpaceOne, crie uma senha e use <strong>Importar backup</strong></p>
+            <p style={{ marginBottom: 0 }}>4. Digite a senha que o cofre tinha quando exportou — pronto</p>
+          </div>
+
+          <Alert type="warning">🔒 O arquivo de backup é cifrado: sem a senha, ele é inútil para quem o encontrar. Mesmo assim, guarde-o com cuidado. Ele também é o seu seguro se este computador quebrar ou o navegador for limpo.</Alert>
+          {error   && <Alert type="error">{error}</Alert>}
+          {success && <Alert type="success">{success}</Alert>}
+
+          <div className="cv-modal-actions">
+            <label className="cv-btn cv-btn-ghost" style={{ cursor: 'pointer' }}>
+              <Icon.Upload /> Importar backup
+              <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImportFile} />
+            </label>
+            <button type="button" onClick={handleExport} className="cv-btn cv-btn-primary">
+              <Icon.Download /> Exportar backup
+            </button>
+          </div>
         </Modal>
       )}
 
