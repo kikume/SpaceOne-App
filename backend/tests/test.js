@@ -1,4 +1,4 @@
-/* CryptoVault — Teste de integração ponta-a-ponta (modelo zero-knowledge).
+/* SpaceOne — Teste de integração ponta-a-ponta (modelo zero-knowledge).
  * Simula EXATAMENTE o que o navegador faria, usando o mesmo módulo de cripto.
  * Backend deve estar rodando em localhost:3001.  Uso: npm test */
 
@@ -31,7 +31,7 @@ const saltOf = async () => (await api(`/api/auth/params?email=${encodeURICompone
 const totp   = (s) => speakeasy.totp({ secret: s, encoding: 'base32' });
 
 (async () => {
-  console.log(`\n🧪 CryptoVault E2E — ${email}\n`);
+  console.log(`\n🧪 SpaceOne E2E — ${email}\n`);
   let reg, totpSecret, setupToken, token, dek, seedId;
 
   await test('health', async () => {

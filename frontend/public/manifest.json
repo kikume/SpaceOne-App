@@ -1,6 +1,6 @@
 {
-  "name": "CryptoVault",
-  "short_name": "CryptoVault",
+  "name": "SpaceOne",
+  "short_name": "SpaceOne",
   "description": "Cofre zero-knowledge para seeds de carteiras cripto",
   "start_url": "/",
   "scope": "/",

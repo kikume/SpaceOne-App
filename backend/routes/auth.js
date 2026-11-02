@@ -37,7 +37,7 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    const totp = speakeasy.generateSecret({ name: `CryptoVault (${norm(email)})`, issuer: 'CryptoVault', length: 32 });
+    const totp = speakeasy.generateSecret({ name: `SpaceOne (${norm(email)})`, issuer: 'SpaceOne', length: 32 });
     const totpEnc = encryptAtRest(totp.base32);
     const authHash    = await bcrypt.hash(authKey, 12);
     const recAuthHash = await bcrypt.hash(recAuthKey, 12);

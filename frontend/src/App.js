@@ -548,7 +548,7 @@ export default function App() {
         <div className="cv-card cv-card-auth">
           <div className="cv-brand">
             <div className="cv-brand-icon"><Icon.Shield /></div>
-            <h1 className="cv-brand-name">CryptoVault</h1>
+            <h1 className="cv-brand-name">SpaceOne</h1>
             <p className="cv-brand-sub">Cifrado no seu dispositivo. Só você abre.</p>
           </div>
 
@@ -938,7 +938,7 @@ export default function App() {
         <header className="cv-header">
           <div className="cv-header-brand">
             <div className="cv-header-icon"><Icon.Shield /></div>
-            <span className="cv-header-name">CryptoVault</span>
+            <span className="cv-header-name">SpaceOne</span>
           </div>
           <div className="cv-header-right">
             {isOffline && <span className="cv-badge-offline">● Offline</span>}

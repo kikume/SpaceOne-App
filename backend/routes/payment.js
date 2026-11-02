@@ -14,7 +14,7 @@ router.use(requireAuth);
 
 // ── GET /qr — QR code Solana Pay (USDC) ─────────────────────
 router.get('/qr', async (req, res) => {
-  const uri = `solana:${PAY_ADDRESS}?amount=${PRICE_USD}&spl-token=${USDC_MINT}&label=CryptoVault&message=Acesso%20vitalicio`;
+  const uri = `solana:${PAY_ADDRESS}?amount=${PRICE_USD}&spl-token=${USDC_MINT}&label=SpaceOne&message=Acesso%20vitalicio`;
   try {
     const qr = await QRCode.toDataURL(uri, { width: 280, margin: 2, color: { dark: '#0f0f1a', light: '#ffffff' } });
     res.json({ qr, uri, address: PAY_ADDRESS, price: PRICE_USD });

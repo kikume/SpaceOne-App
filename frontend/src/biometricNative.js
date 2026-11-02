@@ -36,7 +36,7 @@ export async function storeKey(email, keyB64) {
 /** Pede biometria e devolve a bioKey (base64). Lança se cancelar/falhar. */
 export async function getKey() {
   await NativeBiometric.verifyIdentity({
-    title: 'CryptoVault',
+    title: 'SpaceOne',
     subtitle: 'Desbloquear com biometria',
     reason: 'Confirme sua identidade para abrir o cofre',
   });

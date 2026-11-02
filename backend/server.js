@@ -51,7 +51,7 @@ app.use('/api/seeds',   generalLimiter, seedsRoutes);
 app.use('/api/payment', generalLimiter, paymentRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'CryptoVault API', model: 'zero-knowledge', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', service: 'SpaceOne API', model: 'zero-knowledge', timestamp: new Date().toISOString() });
 });
 
 // API 404
@@ -84,7 +84,7 @@ initDB()
   .then(() => app.listen(PORT, () => {
     console.log(`
 ╔══════════════════════════════════════════╗
-║   🔐  CryptoVault API (zero-knowledge)   ║
+║   🔐  SpaceOne API (zero-knowledge)      ║
 ╠══════════════════════════════════════════╣
 ║  Porta:     ${String(PORT).padEnd(29)}║
 ║  Ambiente:  ${(process.env.NODE_ENV || 'development').padEnd(29)}║

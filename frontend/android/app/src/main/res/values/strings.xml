@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">CryptoVault</string>
-    <string name="title_activity_main">CryptoVault</string>
+    <string name="app_name">SpaceOne</string>
+    <string name="title_activity_main">SpaceOne</string>
     <string name="package_name">com.cryptovault.app</string>
     <string name="custom_url_scheme">com.cryptovault.app</string>
 </resources>

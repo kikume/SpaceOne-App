@@ -1,4 +1,4 @@
-/* CryptoVault Service Worker — offline shell + font cache */
+/* SpaceOne Service Worker — offline shell + font cache */
 const SHELL = 'cv-shell-v1';
 const FONTS = 'cv-fonts-v1';
 

@@ -1,5 +1,5 @@
 /* ============================================================
- * CryptoVault — Criptografia de ponta-a-ponta (lado do cliente) — v2
+ * SpaceOne — Criptografia de ponta-a-ponta (lado do cliente) — v2
  *
  * Módulo ISOMÓRFICO (Web Crypto API). Reforços da v2:
  *   - ARGON2id (memory-hard) no lugar do PBKDF2 — muito mais resistente a

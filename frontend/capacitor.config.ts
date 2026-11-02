@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.cryptovault.app',
-  appName: 'CryptoVault',
+  appName: 'SpaceOne',
   webDir: 'build',
   server: {
     // 'http' permite o teste local via IP da LAN (cleartext). Em produção com

@@ -1,7 +1,7 @@
 {
   "name": "cryptovault-backend",
   "version": "1.0.0",
-  "description": "CryptoVault - Cofre zero-knowledge de seed phrases (cripto E2E no cliente)",
+  "description": "SpaceOne - Cofre zero-knowledge de seed phrases (cripto E2E no cliente)",
   "main": "server.js",
   "engines": {
     "node": ">=18.0.0"
