@@ -7,6 +7,8 @@
  * do cofre (AES-256-GCM). Senha errada = a decifragem falha.
  * ============================================================ */
 import React, { useState, useEffect } from 'react';
+import { generateMnemonic, validateMnemonic } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import Vault from './crypto';
 import './App.css';
 
@@ -25,6 +27,7 @@ const Icon = {
   Upload:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
   LogOut:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   Gear:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33h.01a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51h.01a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.01a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
+  Dice:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1" fill="currentColor"/></svg>,
 };
 
 function Spinner() {
@@ -96,9 +99,24 @@ export default function App() {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      // Privacidade: limpa a área de transferência após 30s para a seed
+      // não ficar esquecida no clipboard (melhor esforço).
+      setTimeout(async () => {
+        try {
+          const current = await navigator.clipboard.readText();
+          if (current === text) await navigator.clipboard.writeText('');
+        } catch {}
+      }, 30000);
     } catch {
       setError('Não foi possível copiar automaticamente. Copie manualmente.');
     }
+  }
+
+  // ── Gerar 12 palavras (BIP39, padrão das carteiras) ───────
+  function handleGenerateSeed() {
+    clearMsgs();
+    setSeedF(p => ({ ...p, seedPhrase: generateMnemonic(wordlist, 128) }));
+    setShowSeed(true); // mostra para o usuário anotar
   }
 
   // ── Primeira vez: criar a senha do cofre ──────────────────
@@ -469,13 +487,15 @@ export default function App() {
           <form onSubmit={handleSaveSeed}>
             <Field label="Nome da carteira">
               <input type="text" required maxLength={100} autoFocus placeholder="Ex: Bitcoin Fria, Ethereum Principal…"
+                autoComplete="off" spellCheck={false}
                 value={seedF.title}
                 onChange={e => setSeedF(p => ({ ...p, title: e.target.value }))} />
             </Field>
 
             <Field label="Seed Phrase">
               <div className="cv-input-wrap cv-textarea-wrap">
-                <textarea required rows={4} className="cv-textarea" placeholder="Escreva ou cole suas 12 ou 24 palavras aqui…"
+                <textarea required rows={4} className="cv-textarea" placeholder="Escreva ou cole suas palavras — ou gere 12 novas abaixo…"
+                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                   value={seedF.seedPhrase}
                   style={{ WebkitTextSecurity: showSeed ? 'none' : 'disc' }}
                   onChange={e => setSeedF(p => ({ ...p, seedPhrase: e.target.value }))} />
@@ -483,10 +503,26 @@ export default function App() {
                   {showSeed ? <Icon.EyeOff /> : <Icon.Eye />}
                 </button>
               </div>
-              <small className="cv-hint">🔒 Cifrada com AES-256 e guardada somente neste aparelho</small>
+              {(() => {
+                const phrase = seedF.seedPhrase.trim().replace(/\s+/g, ' ');
+                if (!phrase) return <small className="cv-hint">🔒 Cifrada com AES-256 e guardada somente neste aparelho</small>;
+                const n = phrase.split(' ').length;
+                const isBip = validateMnemonic(phrase.toLowerCase(), wordlist);
+                return (
+                  <small className="cv-hint" style={{ color: isBip ? '#10b981' : undefined }}>
+                    {isBip
+                      ? `✓ ${n} palavras — frase BIP39 válida (compatível com carteiras)`
+                      : `${n} palavra${n !== 1 ? 's' : ''} — frase personalizada · 🔒 cifrada com AES-256 somente neste aparelho`}
+                  </small>
+                );
+              })()}
             </Field>
 
-            <Alert type="warning">⚠️ Certifique-se de estar em ambiente seguro e privado</Alert>
+            <button type="button" onClick={handleGenerateSeed} className="cv-btn cv-btn-ghost" style={{ width: '100%', marginBottom: 14 }}>
+              <Icon.Dice /> Gerar 12 palavras para mim (BIP39)
+            </button>
+
+            <Alert type="warning">⚠️ Certifique-se de estar em ambiente seguro e privado{seedF.seedPhrase ? '. Se gerou as palavras agora, anote-as em papel antes de salvar.' : ''}</Alert>
             {error && <Alert type="error">{error}</Alert>}
 
             <div className="cv-modal-actions">
