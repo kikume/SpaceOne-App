@@ -64,6 +64,7 @@ export default function App() {
   const [unlockPass, setUnlockPass] = useState('');
   const [changeF, setChangeF] = useState({ current: '', password: '', confirm: '' });
   const [importPass, setImportPass] = useState('');
+  const [revealPass, setRevealPass] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [showSeed, setShowSeed] = useState(false);
   const [copied, setCopied]   = useState(false);
@@ -223,6 +224,23 @@ export default function App() {
       showSuccess('🔒 Seed cifrada e salva neste aparelho');
     } catch (err) {
       setError('Falha ao cifrar a seed: ' + (err.message || 'erro desconhecido'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Revelar seed: exige a senha do cofre (estilo Phantom) ──
+  async function handleRevealSeed(e) {
+    e.preventDefault();
+    clearMsgs();
+    const auth = loadAuth();
+    setLoading(true);
+    try {
+      await Vault.openPasswordLock(revealPass, auth.kdfSalt, auth.wrappedDek);
+      setRevealPass('');
+      setShowSeed(true);
+    } catch {
+      setError('Senha incorreta.');
     } finally {
       setLoading(false);
     }
@@ -537,7 +555,7 @@ export default function App() {
 
       {/* ── Modal: Ver Seed ── */}
       {modal?.type === 'view' && (
-        <Modal onClose={() => { setModal(null); clearMsgs(); setShowSeed(false); setCopied(false); }}>
+        <Modal onClose={() => { setModal(null); clearMsgs(); setShowSeed(false); setCopied(false); setRevealPass(''); }}>
           <div className="cv-modal-header">
             <h3><Icon.Key /> {modal.seed.title}</h3>
             <p className="cv-modal-date">Salva em {formatDate(modal.seed.timestamp)}</p>
@@ -553,28 +571,48 @@ export default function App() {
             ) : (
               <div className="cv-seed-locked">
                 <div className="cv-locked-icon"><Icon.Lock /></div>
-                <p>Clique para revelar a seed phrase</p>
+                <p>Digite a senha do cofre para revelar</p>
                 <small>Certifique-se de que não há câmeras ou pessoas olhando</small>
               </div>
             )}
           </div>
 
-          <Alert type="warning">⚠️ Nunca compartilhe sua seed phrase. Não tire print desta tela.</Alert>
-          {success && <Alert type="success">{success}</Alert>}
+          {!showSeed && (
+            <form onSubmit={handleRevealSeed}>
+              <Field label="Senha do cofre">
+                <input type="password" autoComplete="current-password" required autoFocus placeholder="••••••••"
+                  value={revealPass}
+                  onChange={e => setRevealPass(e.target.value)} />
+              </Field>
+              {error && <Alert type="error">{error}</Alert>}
+              <div className="cv-modal-actions">
+                <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" title="Apagar seed">
+                  <Icon.Trash /> Apagar
+                </button>
+                <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                  {loading ? <><Spinner /> Verificando…</> : <><Icon.Eye /> Revelar Seed</>}
+                </button>
+              </div>
+            </form>
+          )}
 
-          <div className="cv-modal-actions">
-            <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" title="Apagar seed">
-              <Icon.Trash /> Apagar
-            </button>
-            {showSeed && (
-              <button type="button" onClick={() => copyText(modal.seed.seedPhrase)} className={`cv-btn ${copied ? 'cv-btn-copied' : 'cv-btn-ghost'}`}>
-                {copied ? <><Icon.Check /> Copiado!</> : <><Icon.Copy /> Copiar</>}
-              </button>
-            )}
-            <button type="button" onClick={() => setShowSeed(p => !p)} className="cv-btn cv-btn-primary">
-              {showSeed ? <><Icon.EyeOff /> Ocultar</> : <><Icon.Eye /> Revelar Seed</>}
-            </button>
-          </div>
+          {showSeed && (
+            <>
+              <Alert type="warning">⚠️ Nunca compartilhe sua seed phrase. Não tire print desta tela.</Alert>
+              {success && <Alert type="success">{success}</Alert>}
+              <div className="cv-modal-actions">
+                <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" title="Apagar seed">
+                  <Icon.Trash /> Apagar
+                </button>
+                <button type="button" onClick={() => copyText(modal.seed.seedPhrase)} className={`cv-btn ${copied ? 'cv-btn-copied' : 'cv-btn-ghost'}`}>
+                  {copied ? <><Icon.Check /> Copiado!</> : <><Icon.Copy /> Copiar</>}
+                </button>
+                <button type="button" onClick={() => { setShowSeed(false); setRevealPass(''); clearMsgs(); }} className="cv-btn cv-btn-primary">
+                  <Icon.EyeOff /> Ocultar
+                </button>
+              </div>
+            </>
+          )}
         </Modal>
       )}
 
