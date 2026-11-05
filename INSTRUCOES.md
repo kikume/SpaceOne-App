@@ -77,5 +77,5 @@ cofre** no cabeçalho.
 ## Estrutura do projeto
 
 - `frontend/` — o app (React). É tudo que o SpaceOne precisa.
-- `backend/` — API da versão antiga (com contas e nuvem). Não é mais
-  usada nem necessária; mantida apenas como referência.
+- `start.ps1` / `stop.ps1` — atalhos para rodar no Windows.
+- `README.md` — visão geral e arquitetura de segurança.
