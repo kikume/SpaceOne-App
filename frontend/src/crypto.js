@@ -1,15 +1,16 @@
 /* ============================================================
- * SpaceOne — Criptografia local (lado do cliente)
+ * SpaceOne — Local, client-side cryptography
  *
- * MODELO (envelope):
- *   senha → Argon2id (memory-hard) → HKDF → KEK
- *   A KEK embrulha a DEK (chave aleatória de 32 bytes), e a DEK
- *   cifra as seeds com AES-256-GCM. A senha nunca é armazenada:
- *   senha errada gera outra KEK, e o GCM simplesmente não
- *   autentica — não existe "acesso negado", existe ruído.
+ * MODEL (envelope encryption):
+ *   password → Argon2id (memory-hard) → HKDF → KEK
+ *   The KEK wraps the DEK (a random 32-byte key), and the DEK
+ *   encrypts the seeds with AES-256-GCM. The password is never
+ *   stored: a wrong password derives a different KEK, and GCM
+ *   authentication simply fails — there is no "access denied",
+ *   only noise.
  *
- * Parâmetros do Argon2id: OWASP — m=19 MiB, t=2, p=1
- * (equilíbrio entre resistência a GPU e desempenho em celular).
+ * Argon2id parameters: OWASP — m=19 MiB, t=2, p=1
+ * (a good balance of GPU resistance and mobile performance).
  * ============================================================ */
 /* global globalThis */
 const { argon2id } = require('@noble/hashes/argon2.js');
@@ -25,7 +26,7 @@ const textDec = new TextDecoder();
 function b64enc(bytes) { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); }
 function b64dec(str)   { const s = atob(str); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
 
-// ── Primitivas ───────────────────────────────────────────────
+// ── Primitives ───────────────────────────────────────────────
 function argon2Bits(secret, saltBytes) {
   return argon2id(textEnc.encode(secret), saltBytes, ARGON); // Uint8Array(32)
 }
@@ -53,9 +54,9 @@ async function aesDecrypt(keyBytes, b64) {
   return new Uint8Array(await SUBTLE().decrypt({ name: 'AES-GCM', iv }, key, ct));
 }
 
-/** Deriva a KEK a partir de um segredo (senha) + salt.
- *  Os rótulos do HKDF são FIXOS por compatibilidade: mudá-los
- *  impede a abertura de todos os cofres e backups já criados. */
+/** Derives the KEK from a secret (the password) + salt.
+ *  The HKDF info labels are FROZEN for compatibility: changing
+ *  them would make every existing vault and backup unreadable. */
 async function deriveFromSecret(secret, saltBytes) {
   const pwBits  = argon2Bits(secret, saltBytes);
   const master  = await hkdf(pwBits, 'cryptovault-master-v2', 32, new Uint8Array(0));
@@ -64,10 +65,10 @@ async function deriveFromSecret(secret, saltBytes) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  API PÚBLICA
+//  PUBLIC API
 // ════════════════════════════════════════════════════════════
 
-/** Cria a trava: deriva KEK da senha e embrulha a DEK (nova ou existente). */
+/** Creates the lock: derives a KEK from the password and wraps the DEK (new or existing). */
 async function createPasswordLock(password, existingDek) {
   const salt = RAND(16);
   const dek  = existingDek || RAND(32);
@@ -75,18 +76,18 @@ async function createPasswordLock(password, existingDek) {
   return { kdfSalt: b64enc(salt), wrappedDek: await aesEncrypt(kek, dek), dek };
 }
 
-/** Abre a trava: senha correta devolve a DEK; errada lança exceção. */
+/** Opens the lock: the correct password returns the DEK; a wrong one throws. */
 async function openPasswordLock(password, kdfSaltB64, wrappedDekB64) {
   const { kek } = await deriveFromSecret(password, b64dec(kdfSaltB64));
   return aesDecrypt(kek, wrappedDekB64);
 }
 
-/** Cifra uma seed (título + frase) com a DEK. */
+/** Encrypts a seed (title + phrase) with the DEK. */
 async function encryptSeed(dek, title, seedPhrase) {
   return aesEncrypt(dek, textEnc.encode(JSON.stringify({ title, seedPhrase })));
 }
 
-/** Decifra um blob com a DEK. */
+/** Decrypts a blob with the DEK. */
 async function decryptSeed(dek, blobB64) {
   return JSON.parse(textDec.decode(await aesDecrypt(dek, blobB64)));
 }

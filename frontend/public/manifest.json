@@ -1,7 +1,7 @@
 {
   "name": "SpaceOne",
   "short_name": "SpaceOne",
-  "description": "Cofre zero-knowledge para seeds de carteiras cripto",
+  "description": "A local seed phrase vault — AES-256, offline, open source",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

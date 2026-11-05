@@ -6,8 +6,8 @@ import App from './App';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
 
-// PWA: shell offline. Registrado aqui (e não inline no index.html) porque a
-// Content-Security-Policy de produção bloqueia scripts inline.
+// PWA: offline shell. Registered here (not inline in index.html) because the
+// production Content-Security-Policy blocks inline scripts.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});

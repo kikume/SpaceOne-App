@@ -1,4 +1,4 @@
 # ============================================================
-#  SpaceOne — Para o app
+#  SpaceOne — Stop the app
 # ============================================================
-Write-Host "Para parar o SpaceOne, feche a janela do PowerShell que o start.ps1 abriu." -ForegroundColor Green
+Write-Host "To stop SpaceOne, close the PowerShell window opened by start.ps1." -ForegroundColor Green

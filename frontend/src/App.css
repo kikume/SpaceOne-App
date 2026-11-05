@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════
    SpaceOne — Design System v3 (Deep Space / Gold)
-   Identidade: azul-espaço profundo, dourado de cofre, hexágono
+   Identity: deep space blue, vault gold, hexagon
    ═══════════════════════════════════════════════════════════ */
 
 :root {
@@ -21,7 +21,7 @@
   --gold-dim:      rgba(242,193,78,.09);
   --gold-mid:      rgba(242,193,78,.24);
 
-  /* alias para manter compatibilidade com nomes antigos */
+  /* aliases kept for backward compatibility */
   --primary:       var(--gold);
   --primary-h:     var(--gold-h);
   --primary-d:     var(--gold-d);
@@ -79,7 +79,7 @@ body {
   overflow-x: hidden;
 }
 
-/* ── Campo de estrelas (compartilhado pelas telas) ────────── */
+/* ── Starfield (shared across screens) ────────── */
 .cv-bg, .cv-dashboard { position: relative; }
 .cv-bg::after, .cv-dashboard::after {
   content: '';
@@ -98,7 +98,7 @@ body {
 }
 .cv-bg > *, .cv-dashboard > * { position: relative; z-index: 1; }
 
-/* ── Fundo das telas de autenticação ─────────────────────── */
+/* ── Auth screens background ─────────────────────── */
 .cv-bg {
   min-height: 100vh;
   display: flex; align-items: center; justify-content: center;
@@ -110,7 +110,7 @@ body {
     linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 100%);
 }
 
-/* ── Card base ───────────────────────────────────────────── */
+/* ── Base card ───────────────────────────────────────────── */
 .cv-card {
   background: linear-gradient(165deg, #121a30 0%, #0d1326 55%, #0b101f 100%);
   border: 1px solid var(--border);
@@ -123,7 +123,7 @@ body {
   overflow: hidden;
 }
 
-/* linha de luz dourada no topo */
+/* golden light line at the top */
 .cv-card::before {
   content: '';
   position: absolute;
@@ -141,7 +141,7 @@ body {
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ── Marca / Logo ────────────────────────────────────────── */
+/* ── Brand / Logo ────────────────────────────────────────── */
 .cv-brand { text-align: center; margin-bottom: 34px; }
 
 .cv-brand-logo {
@@ -190,7 +190,7 @@ body {
 }
 .cv-brand-sub { font-size: 14px; color: var(--text-2); }
 
-/* ── Formulário ──────────────────────────────────────────── */
+/* ── Form ──────────────────────────────────────────── */
 .cv-form { display: flex; flex-direction: column; gap: 16px; }
 .cv-field { display: flex; flex-direction: column; gap: 7px; }
 
@@ -249,13 +249,13 @@ body {
 .cv-textarea { min-height: 100px; }
 .cv-hint { font-size: 12px; color: var(--text-3); margin-top: 4px; line-height: 1.5; }
 
-/* ── Força da senha ──────────────────────────────────────── */
+/* ── Password strength ──────────────────────────────────────── */
 .cv-pwd-strength { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .cv-pwd-bars { display: flex; gap: 4px; flex: 1; }
 .cv-pwd-bar { height: 3px; flex: 1; border-radius: 2px; background: var(--border); transition: background .3s; }
 .cv-pwd-strength span { font-size: 12px; font-weight: 600; min-width: 58px; }
 
-/* ── Botões ──────────────────────────────────────────────── */
+/* ── Buttons ──────────────────────────────────────────────── */
 .cv-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: none; border-radius: var(--radius-sm);
@@ -301,7 +301,7 @@ body {
 
 .cv-btn-copied { background: var(--green-dim); border: 1px solid var(--green-border); color: var(--green); }
 
-/* ── Separador ───────────────────────────────────────────── */
+/* ── Divider ───────────────────────────────────────────── */
 .cv-sep {
   display: flex; align-items: center; gap: 12px;
   margin: 20px 0 16px;
@@ -312,7 +312,7 @@ body {
   content: ''; flex: 1; height: 1px; background: var(--border);
 }
 
-/* ── Alertas ─────────────────────────────────────────────── */
+/* ── Alerts ─────────────────────────────────────────────── */
 .cv-alert {
   padding: 12px 16px; border-radius: var(--radius-sm);
   font-size: 13.5px; line-height: 1.55;
@@ -410,7 +410,7 @@ body {
 }
 .cv-dash-sub { font-size: 13px; color: var(--text-3); margin-top: 4px; }
 
-/* ── Estados ─────────────────────────────────────────────── */
+/* ── States ─────────────────────────────────────────────── */
 .cv-state-center {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 14px;
@@ -429,7 +429,7 @@ body {
 .cv-empty p  { max-width: 320px; font-size: 14px; color: var(--text-2); margin-bottom: 28px; line-height: 1.65; }
 .cv-empty .cv-btn { width: auto; }
 
-/* ── Grid de seeds ───────────────────────────────────────── */
+/* ── Seeds grid ───────────────────────────────────────── */
 .cv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
 
 .cv-seed-card {
@@ -487,7 +487,7 @@ body {
 .cv-btn-view:hover { background: var(--gold-dim); color: var(--gold-h); }
 
 /* ════════════════════════════════════════════════════════════
-   MODAIS
+   MODALS
    ════════════════════════════════════════════════════════════ */
 .cv-overlay {
   position: fixed; inset: 0; z-index: 50;
@@ -546,7 +546,7 @@ body {
 .cv-modal-actions { display: flex; gap: 10px; margin-top: 24px; }
 .cv-modal-actions .cv-btn { flex: 1; }
 
-/* ── Reveal da seed ──────────────────────────────────────── */
+/* ── Seed reveal ──────────────────────────────────────── */
 .cv-seed-reveal {
   border-radius: var(--radius); margin-bottom: 20px;
   overflow: hidden; border: 1px solid var(--border);
@@ -569,7 +569,7 @@ body {
 .cv-seed-locked p    { font-size: 14px; font-weight: 600; color: var(--text-2); }
 .cv-seed-locked small { font-size: 12px; color: var(--text-3); }
 
-/* ── Grid de palavras ────────────────────────────────────── */
+/* ── Word grid ────────────────────────────────────── */
 .cv-word-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(115px, 1fr));
@@ -612,7 +612,7 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
 
-/* ── Responsivo ──────────────────────────────────────────── */
+/* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 480px) {
   .cv-card  { padding: 28px 20px; border-radius: var(--radius-lg); }
   .cv-modal { padding: 24px 18px; border-radius: var(--radius-lg); }
@@ -627,7 +627,7 @@ body {
   .cv-brand-logo { width: 72px; height: 72px; }
 }
 
-/* ── Link discreto ───────────────────────────────────────── */
+/* ── Subtle link ───────────────────────────────────────── */
 .cv-link-btn {
   display: block; width: 100%;
   margin-top: 16px;
@@ -638,7 +638,7 @@ body {
 }
 .cv-link-btn:hover { color: var(--gold); }
 
-/* ── Caixa de destaque ───────────────────────────────────── */
+/* ── Highlight box ───────────────────────────────────── */
 .cv-recovery-box {
   margin-top: 20px; padding: 18px;
   background: rgba(242,193,78,.06);
@@ -671,7 +671,7 @@ body {
 }
 .cv-checkbox input { width: 17px; height: 17px; margin-top: 2px; accent-color: var(--gold); cursor: pointer; flex-shrink: 0; }
 
-/* ── Botão de perigo ─────────────────────────────────────── */
+/* ── Danger button ─────────────────────────────────────── */
 .cv-btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid var(--red-border); }
 .cv-btn-danger:hover:not(:disabled) { background: rgba(248,113,113,.18); }
 .cv-btn-danger .cv-spinner { border-color: rgba(248,113,113,.3); border-top-color: var(--red); }

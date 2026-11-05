@@ -5,8 +5,8 @@
 <h1 align="center">SpaceOne</h1>
 
 <p align="center">
-  <strong>Suas seeds. Seu aparelho. Mais ninguém.</strong><br/>
-  Cofre local de seed phrases com criptografia de ponta a ponta — sem conta, sem servidor, sem rastreamento.
+  <strong>Your seeds. Your device. No one else.</strong><br/>
+  A local seed phrase vault with end-to-end encryption — no account, no server, no tracking.
 </p>
 
 <p align="center">
@@ -15,20 +15,24 @@
 
 ---
 
-## O que é
+## What it is
 
-O SpaceOne guarda as seed phrases das suas carteiras cripto **somente no seu dispositivo**. Não existe servidor, conta, nuvem ou telemetria: as palavras são cifradas no próprio navegador e nunca saem dele.
+SpaceOne stores your crypto wallet seed phrases **on your own device only**. There is no server, no account, no cloud and no telemetry: your words are encrypted right in the browser and never leave it.
 
-- 🔑 **Senha soberana** — no primeiro uso você cria a senha do cofre. Ela nunca é armazenada: dela deriva-se a chave de criptografia (Argon2id + HKDF). Senha errada não recebe "acesso negado" — ela simplesmente não decifra nada.
-- 🔒 **AES-256-GCM** — cada seed é cifrada com o mesmo padrão usado por bancos, com chave de 256 bits e verificação de integridade.
-- 🎲 **Gerador BIP39** — crie seeds de 12 palavras no padrão das carteiras (Phantom, MetaMask, Ledger…) ou guarde frases próprias.
-- 👁 **Senha para revelar** — ver uma seed exige digitar a senha de novo, mesmo com o cofre aberto.
-- 💾 **Backup cifrado** — exporte um arquivo que só abre com a sua senha e leve o cofre para qualquer computador.
-- 📴 **Offline por padrão** — funciona sem internet (PWA instalável).
+- 🔑 **Sovereign password** — on first use you create the vault password. It is never stored: the encryption key is derived from it (Argon2id + HKDF). A wrong password doesn't get an "access denied" — it simply decrypts nothing.
+- 🔒 **AES-256-GCM** — every seed is encrypted with the same standard used by banks, with a 256-bit key and integrity authentication.
+- 🎲 **BIP39 generator** — create 12-word seeds in the wallet standard (Phantom, MetaMask, Ledger…) or store your own custom phrases.
+- 👁 **Password to reveal** — viewing a seed requires typing the password again, even with the vault open.
+- 💾 **Encrypted backup** — export a file that only opens with your password and take your vault to any computer.
+- 📴 **Offline by default** — works without internet (installable PWA).
 
-## Como rodar
+## Download
 
-Pré-requisito: [Node.js 18+](https://nodejs.org)
+Grab the ZIP from [`download/SpaceOne-v1.0.0.zip`](download/SpaceOne-v1.0.0.zip) (or the latest [Release](../../releases)), extract it and double-click **index.html**. That's it — no install, no server.
+
+## Run from source
+
+Requires [Node.js 18+](https://nodejs.org)
 
 ```bash
 cd frontend
@@ -36,56 +40,54 @@ npm install
 npm start
 ```
 
-Abra **http://localhost:3000**. No Windows, você também pode usar `.\start.ps1` na raiz do projeto.
+Open **http://localhost:3000**. On Windows you can also use `.\start.ps1` at the project root.
 
-Build de produção (arquivos estáticos, servíveis em qualquer hospedagem ou abertos direto do disco):
+Production build (static files, servable anywhere or opened straight from disk):
 
 ```bash
 cd frontend
 npm run build
 ```
 
-Guia completo em [INSTRUCOES.md](INSTRUCOES.md).
-
-## Como funciona a segurança
+## How the security works
 
 ```
-senha ──Argon2id──▶ chave mestra ──HKDF──▶ KEK ──embrulha──▶ DEK
-                                                              │
-seeds ◀──────────────── AES-256-GCM ◀─────────────────────────┘
+password ──Argon2id──▶ master key ──HKDF──▶ KEK ──wraps──▶ DEK
+                                                            │
+seeds ◀──────────────── AES-256-GCM ◀───────────────────────┘
 ```
 
-1. Sua senha passa pelo **Argon2id** (função memory-hard, parâmetros OWASP) e vira uma chave — processo de mão única, a chave não revela a senha.
-2. Essa chave embrulha a **DEK**, a chave aleatória que cifra as seeds com **AES-256-GCM**.
-3. No disco ficam apenas o salt, a DEK embrulhada e os blobs cifrados. **A senha e as seeds nunca são gravadas em texto puro.**
-4. Senha errada gera uma chave diferente — e a autenticação do GCM falha. É matemática, não cadeado.
+1. Your password goes through **Argon2id** (a memory-hard function, OWASP parameters) and becomes a key — a one-way process; the key cannot reveal the password.
+2. That key wraps the **DEK**, the random key that encrypts your seeds with **AES-256-GCM**.
+3. Only the salt, the wrapped DEK and the encrypted blobs ever touch disk. **Neither the password nor the seeds are ever written in plain text.**
+4. A wrong password derives a different key — and GCM authentication fails. Math, not locks.
 
-### O que o SpaceOne *não* consegue fazer, por design
+### What SpaceOne *cannot* do, by design
 
-- Não consegue ver suas seeds
-- Não consegue recuperar sua senha (não há "esqueci minha senha" — anote-a bem)
-- Não consegue rastrear o que você guarda
+- It cannot see your seeds
+- It cannot recover your password (there is no "forgot password" — write it down)
+- It cannot track what you store
 
-> ⚠️ **Avisos importantes:** se você esquecer a senha, não há recuperação. Limpar os dados do navegador apaga o cofre — mantenha um backup exportado. E qualquer pessoa com a sua senha e acesso ao seu aparelho abre o cofre: use o bloqueio de tela do sistema.
+> ⚠️ **Important:** if you forget your password, there is no recovery. Clearing your browser data wipes the vault — keep an exported backup. And anyone with your password and access to your device can open the vault: use your operating system's screen lock.
 
-## Estrutura do projeto
+## Project structure
 
 ```
-frontend/            o app (React)
-  src/App.js         interface e fluxos do cofre
-  src/crypto.js      criptografia (Argon2id, HKDF, AES-256-GCM)
-  public/            PWA, ícones e logo
-start.ps1            inicia o app no Windows
-INSTRUCOES.md        guia de uso e build
+frontend/            the app (React)
+  src/App.js         vault UI and flows
+  src/crypto.js      cryptography (Argon2id, HKDF, AES-256-GCM)
+  public/            PWA, icons and logo
+download/            ready-to-use ZIP build
+start.ps1            launches the app on Windows
 ```
 
-## Verifique você mesmo
+## Verify it yourself
 
-Não pedimos a sua confiança — pedimos a sua auditoria. Toda a criptografia está em [`frontend/src/crypto.js`](frontend/src/crypto.js) (~100 linhas), construída sobre as bibliotecas auditadas [`@noble/hashes`](https://github.com/paulmillr/noble-hashes) e [`@scure/bip39`](https://github.com/paulmillr/scure-bip39) e a Web Crypto API do navegador.
+We are not asking for your trust — we are asking for your audit. All the cryptography lives in [`frontend/src/crypto.js`](frontend/src/crypto.js) (~100 lines), built on the audited [`@noble/hashes`](https://github.com/paulmillr/noble-hashes) and [`@scure/bip39`](https://github.com/paulmillr/scure-bip39) libraries and the browser's Web Crypto API.
 
-## Licença
+## License
 
-[MIT](LICENSE) — livre para usar, estudar, modificar e distribuir.
+[MIT](LICENSE) — free to use, study, modify and distribute.
 
 ---
 

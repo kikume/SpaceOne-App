@@ -1,10 +1,11 @@
 /* ============================================================
- * SpaceOne — Cofre local de seed phrases (estilo Phantom)
+ * SpaceOne — Local seed phrase vault (Phantom-style)
  *
- * 100% local: sem conta e sem servidor. No primeiro uso você cria
- * uma senha; depois o app só abre com ela. A senha NUNCA é salva:
- * dela deriva-se uma chave (Argon2id + HKDF) que embrulha a chave
- * do cofre (AES-256-GCM). Senha errada = a decifragem falha.
+ * 100% local: no account, no server. On first use you create a
+ * password; afterwards the app only opens with it. The password
+ * is NEVER stored: a key is derived from it (Argon2id + HKDF)
+ * which wraps the vault key (AES-256-GCM). A wrong password
+ * simply fails to decrypt.
  * ============================================================ */
 import React, { useState, useEffect } from 'react';
 import { generateMnemonic, validateMnemonic } from '@scure/bip39';
@@ -12,7 +13,7 @@ import { wordlist } from '@scure/bip39/wordlists/english.js';
 import Vault from './crypto';
 import './App.css';
 
-// ── Ícones inline (sem dependência externa) ──────────────────
+// ── Inline icons (no external dependency) ────────────────────
 const Icon = {
   Lock:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
   Key:     () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6M15.5 7.5l3 3"/></svg>,
@@ -31,13 +32,13 @@ const Icon = {
 };
 
 function Spinner() {
-  return <span className="cv-spinner" aria-label="Carregando" />;
+  return <span className="cv-spinner" aria-label="Loading" />;
 }
 
-// ── Armazenamento local ──────────────────────────────────────
-const STORE_KEY   = 'spaceone_vault_v1';  // seeds cifradas
-const AUTH_KEY    = 'spaceone_auth_v2';   // { kdfSalt, wrappedDek } — a senha nunca é salva
-const LEGACY_DEK  = 'spaceone_dek_v1';    // versão antiga (chave sem senha) — migrada no setup
+// ── Local storage ────────────────────────────────────────────
+const STORE_KEY   = 'spaceone_vault_v1';  // encrypted seeds
+const AUTH_KEY    = 'spaceone_auth_v2';   // { kdfSalt, wrappedDek } — the password itself is never stored
+const LEGACY_DEK  = 'spaceone_dek_v1';    // old passwordless version — migrated during setup
 
 function b64dec(str) { const s = atob(str); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
 
@@ -47,18 +48,18 @@ function loadStore() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) 
 function saveStore(items) { localStorage.setItem(STORE_KEY, JSON.stringify(items)); }
 
 function formatDate(ts) {
-  try { return new Date(ts).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }); } catch { return ''; }
+  try { return new Date(ts).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }); } catch { return ''; }
 }
 
 export default function App() {
-  // setup (primeira vez) | unlock (pede senha) | vault (aberto)
+  // setup (first run) | unlock (asks for password) | vault (open)
   const [view, setView]       = useState(() => (loadAuth() ? 'unlock' : 'setup'));
-  const [dek, setDek]         = useState(null);    // chave do cofre — SÓ em memória
-  const [seeds, setSeeds]     = useState([]);      // decifradas — só em memória
+  const [dek, setDek]         = useState(null);    // vault key — memory ONLY
+  const [seeds, setSeeds]     = useState([]);      // decrypted — memory only
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
-  const [modal, setModal]     = useState(null);    // {type:'add'|'view'|'changepass'|'importpass'}
+  const [modal, setModal]     = useState(null);    // {type:'add'|'view'|'changepass'|'backup'|'importpass'}
   const [seedF, setSeedF]     = useState({ title: '', seedPhrase: '' });
   const [passF, setPassF]     = useState({ password: '', confirm: '' });
   const [unlockPass, setUnlockPass] = useState('');
@@ -75,7 +76,7 @@ export default function App() {
     setTimeout(() => setSuccess(''), ms);
   }
 
-  // ── Com o cofre aberto, decifra as seeds guardadas ────────
+  // ── With the vault open, decrypt the stored seeds ──────────
   useEffect(() => {
     if (view !== 'vault' || !dek) return;
     (async () => {
@@ -86,7 +87,7 @@ export default function App() {
           const data = await Vault.decryptSeed(dek, item.blob);
           out.push({ id: item.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: item.createdAt });
         } catch {
-          out.push({ id: item.id, title: '(não foi possível decifrar)', seedPhrase: '', timestamp: item.createdAt, broken: true });
+          out.push({ id: item.id, title: '(could not decrypt)', seedPhrase: '', timestamp: item.createdAt, broken: true });
         }
       }
       setSeeds(out);
@@ -100,8 +101,8 @@ export default function App() {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      // Privacidade: limpa a área de transferência após 30s para a seed
-      // não ficar esquecida no clipboard (melhor esforço).
+      // Privacy: clear the clipboard after 30s so the seed is not
+      // left behind (best effort).
       setTimeout(async () => {
         try {
           const current = await navigator.clipboard.readText();
@@ -109,27 +110,27 @@ export default function App() {
         } catch {}
       }, 30000);
     } catch {
-      setError('Não foi possível copiar automaticamente. Copie manualmente.');
+      setError('Could not copy automatically. Please copy manually.');
     }
   }
 
-  // ── Gerar 12 palavras (BIP39, padrão das carteiras) ───────
+  // ── Generate 12 words (BIP39, the wallet standard) ─────────
   function handleGenerateSeed() {
     clearMsgs();
     setSeedF(p => ({ ...p, seedPhrase: generateMnemonic(wordlist, 128) }));
-    setShowSeed(true); // mostra para o usuário anotar
+    setShowSeed(true); // show them so the user can write them down
   }
 
-  // ── Primeira vez: criar a senha do cofre ──────────────────
+  // ── First run: create the vault password ───────────────────
   async function handleSetup(e) {
     e.preventDefault();
     clearMsgs();
-    if (passF.password.length < 8) { setError('A senha precisa ter pelo menos 8 caracteres.'); return; }
-    if (passF.password !== passF.confirm) { setError('As senhas não conferem.'); return; }
+    if (passF.password.length < 8) { setError('The password must be at least 8 characters long.'); return; }
+    if (passF.password !== passF.confirm) { setError('Passwords do not match.'); return; }
     setLoading(true);
     try {
-      // Migração: se existir o cofre antigo (sem senha), reaproveita a chave
-      // dele para que as seeds já salvas continuem abrindo.
+      // Migration: if the old passwordless vault exists, reuse its
+      // key so previously saved seeds keep opening.
       let legacyDek = null;
       try {
         const b64 = localStorage.getItem(LEGACY_DEK);
@@ -137,19 +138,19 @@ export default function App() {
       } catch {}
       const lock = await Vault.createPasswordLock(passF.password, legacyDek);
       saveAuth({ kdfSalt: lock.kdfSalt, wrappedDek: lock.wrappedDek, createdAt: new Date().toISOString() });
-      try { localStorage.removeItem(LEGACY_DEK); } catch {} // some com a chave sem proteção
+      try { localStorage.removeItem(LEGACY_DEK); } catch {} // drop the unprotected key
       setDek(lock.dek);
       setPassF({ password: '', confirm: '' });
       setView('vault');
-      showSuccess('🔒 Cofre criado. Guarde bem a sua senha — sem ela não há recuperação.');
+      showSuccess('🔒 Vault created. Keep your password safe — there is no recovery without it.');
     } catch (err) {
-      setError('Falha ao criar o cofre: ' + (err.message || 'erro desconhecido'));
+      setError('Failed to create the vault: ' + (err.message || 'unknown error'));
     } finally {
       setLoading(false);
     }
   }
 
-  // ── Desbloquear com a senha ───────────────────────────────
+  // ── Unlock with the password ────────────────────────────────
   async function handleUnlock(e) {
     e.preventDefault();
     clearMsgs();
@@ -162,13 +163,13 @@ export default function App() {
       setUnlockPass('');
       setView('vault');
     } catch {
-      setError('Senha incorreta.');
+      setError('Incorrect password.');
     } finally {
       setLoading(false);
     }
   }
 
-  // ── Bloquear (limpa tudo da memória) ──────────────────────
+  // ── Lock (wipe everything from memory) ──────────────────────
   function handleLock() {
     setDek(null);
     setSeeds([]);
@@ -179,37 +180,54 @@ export default function App() {
     setView('unlock');
   }
 
-  // ── Trocar a senha ────────────────────────────────────────
+  // ── Change the password ─────────────────────────────────────
   async function handleChangePassword(e) {
     e.preventDefault();
     clearMsgs();
     const auth = loadAuth();
-    if (changeF.password.length < 8) { setError('A nova senha precisa ter pelo menos 8 caracteres.'); return; }
-    if (changeF.password !== changeF.confirm) { setError('As novas senhas não conferem.'); return; }
+    if (changeF.password.length < 8) { setError('The new password must be at least 8 characters long.'); return; }
+    if (changeF.password !== changeF.confirm) { setError('New passwords do not match.'); return; }
     setLoading(true);
     try {
-      // confirma a senha atual antes de trocar
+      // confirm the current password before changing
       await Vault.openPasswordLock(changeF.current, auth.kdfSalt, auth.wrappedDek);
       const lock = await Vault.createPasswordLock(changeF.password, dek);
       saveAuth({ ...auth, kdfSalt: lock.kdfSalt, wrappedDek: lock.wrappedDek });
       setChangeF({ current: '', password: '', confirm: '' });
       setModal(null);
-      showSuccess('Senha alterada com sucesso.');
+      showSuccess('Password changed successfully.');
     } catch {
-      setError('Senha atual incorreta.');
+      setError('Current password is incorrect.');
     } finally {
       setLoading(false);
     }
   }
 
-  // ── Salvar nova seed ──────────────────────────────────────
+  // ── Reveal a seed: requires the vault password ──────────────
+  async function handleRevealSeed(e) {
+    e.preventDefault();
+    clearMsgs();
+    const auth = loadAuth();
+    setLoading(true);
+    try {
+      await Vault.openPasswordLock(revealPass, auth.kdfSalt, auth.wrappedDek);
+      setRevealPass('');
+      setShowSeed(true);
+    } catch {
+      setError('Incorrect password.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Save a new seed ─────────────────────────────────────────
   async function handleSaveSeed(e) {
     e.preventDefault();
     clearMsgs();
     const title = seedF.title.trim();
     const phrase = seedF.seedPhrase.trim().replace(/\s+/g, ' ');
     if (!title || !phrase) return;
-    if (phrase.split(' ').length < 3) { setError('A seed phrase parece curta demais. Confira as palavras.'); return; }
+    if (phrase.split(' ').length < 3) { setError('That seed phrase looks too short. Double-check the words.'); return; }
     setLoading(true);
     try {
       const blob = await Vault.encryptSeed(dek, title, phrase);
@@ -221,42 +239,25 @@ export default function App() {
       setModal(null);
       setSeedF({ title: '', seedPhrase: '' });
       setShowSeed(false);
-      showSuccess('🔒 Seed cifrada e salva neste aparelho');
+      showSuccess('🔒 Seed encrypted and saved on this device');
     } catch (err) {
-      setError('Falha ao cifrar a seed: ' + (err.message || 'erro desconhecido'));
+      setError('Failed to encrypt the seed: ' + (err.message || 'unknown error'));
     } finally {
       setLoading(false);
     }
   }
 
-  // ── Revelar seed: exige a senha do cofre (estilo Phantom) ──
-  async function handleRevealSeed(e) {
-    e.preventDefault();
-    clearMsgs();
-    const auth = loadAuth();
-    setLoading(true);
-    try {
-      await Vault.openPasswordLock(revealPass, auth.kdfSalt, auth.wrappedDek);
-      setRevealPass('');
-      setShowSeed(true);
-    } catch {
-      setError('Senha incorreta.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ── Apagar seed ───────────────────────────────────────────
+  // ── Delete a seed ───────────────────────────────────────────
   function handleDeleteSeed(id) {
-    if (!window.confirm('Apagar esta seed deste aparelho? Esta ação não pode ser desfeita.')) return;
+    if (!window.confirm('Delete this seed from this device? This cannot be undone.')) return;
     saveStore(loadStore().filter(i => i.id !== id));
     setSeeds(p => p.filter(s => s.id !== id));
     setModal(null);
     setShowSeed(false);
-    showSuccess('Seed apagada deste aparelho.');
+    showSuccess('Seed deleted from this device.');
   }
 
-  // ── Backup: exporta cofre cifrado (abre só com a senha) ───
+  // ── Backup: export the encrypted vault (opens only with the password) ──
   function handleExport() {
     clearMsgs();
     const auth = loadAuth();
@@ -271,7 +272,7 @@ export default function App() {
     a.download = `spaceone-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
-    showSuccess('Backup exportado. Ele só abre com a senha usada na exportação.');
+    showSuccess('Backup exported. It only opens with the password used at export time.');
   }
 
   function handleImportFile(e) {
@@ -281,16 +282,16 @@ export default function App() {
     if (!file) return;
     file.text().then(text => {
       const payload = JSON.parse(text);
-      if (payload.app !== 'SpaceOne' || !Array.isArray(payload.items)) throw new Error('inválido');
+      if (payload.app !== 'SpaceOne' || !Array.isArray(payload.items)) throw new Error('invalid');
       if (payload.version === 1 && payload.dek) {
-        // backup antigo (sem senha): a chave vem dentro do arquivo
+        // legacy passwordless backup: the key travels inside the file
         doImport(payload, b64dec(payload.dek));
       } else if (payload.version === 2 && payload.kdfSalt && payload.wrappedDek) {
         setModal({ type: 'importpass', payload });
       } else {
-        throw new Error('inválido');
+        throw new Error('invalid');
       }
-    }).catch(() => setError('Arquivo de backup inválido.'));
+    }).catch(() => setError('Invalid backup file.'));
   }
 
   async function handleImportPass(e) {
@@ -304,7 +305,7 @@ export default function App() {
       setModal(null);
       await doImport(payload, importDek);
     } catch {
-      setError('Senha do backup incorreta.');
+      setError('Incorrect backup password.');
     } finally {
       setLoading(false);
     }
@@ -317,8 +318,8 @@ export default function App() {
       const added = [];
       for (const item of payload.items) {
         if (store.some(i => i.id === item.id)) continue;
-        const data = await Vault.decryptSeed(importDek, item.blob);           // abre com a chave do backup
-        const blob = await Vault.encryptSeed(dek, data.title, data.seedPhrase); // re-cifra com a chave deste cofre
+        const data = await Vault.decryptSeed(importDek, item.blob);              // open with the backup's key
+        const blob = await Vault.encryptSeed(dek, data.title, data.seedPhrase); // re-encrypt with this vault's key
         const newItem = { id: item.id, blob, createdAt: item.createdAt };
         store.push(newItem);
         added.push({ id: newItem.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: newItem.createdAt });
@@ -326,17 +327,17 @@ export default function App() {
       saveStore(store);
       if (added.length) setSeeds(p => [...added, ...p]);
       showSuccess(added.length
-        ? `Backup importado: ${added.length} seed${added.length !== 1 ? 's' : ''} restaurada${added.length !== 1 ? 's' : ''}.`
-        : 'Nada novo para importar — todas as seeds do backup já estão aqui.');
+        ? `Backup imported: ${added.length} seed${added.length !== 1 ? 's' : ''} restored.`
+        : 'Nothing new to import — every seed in the backup is already here.');
     } catch {
-      setError('Não foi possível importar: o backup está corrompido ou a senha não confere.');
+      setError('Could not import: the backup is corrupted or the password does not match.');
     } finally {
       setLoading(false);
     }
   }
 
   // ════════════════════════════════════════════════════════
-  // TELA: CRIAR SENHA (primeira vez)
+  // SCREEN: CREATE PASSWORD (first run)
   // ════════════════════════════════════════════════════════
   if (view === 'setup') {
     return (
@@ -345,13 +346,13 @@ export default function App() {
           <div className="cv-brand">
             <img src="/logo.png" alt="SpaceOne" className="cv-brand-logo" />
             <h1 className="cv-brand-name">SpaceOne</h1>
-            <p className="cv-brand-sub">Crie a senha do seu cofre. Tudo fica só neste aparelho.</p>
+            <p className="cv-brand-sub">Create your vault password. Everything stays on this device.</p>
           </div>
 
           <form onSubmit={handleSetup} className="cv-form" noValidate>
-            <Field label="Senha do cofre">
+            <Field label="Vault password">
               <div className="cv-input-wrap">
-                <input type={showPass ? 'text' : 'password'} autoComplete="new-password" required autoFocus placeholder="Mínimo 8 caracteres"
+                <input type={showPass ? 'text' : 'password'} autoComplete="new-password" required autoFocus placeholder="At least 8 characters"
                   value={passF.password}
                   onChange={e => setPassF(p => ({ ...p, password: e.target.value }))} />
                 <button type="button" className="cv-eye" onClick={() => setShowPass(p => !p)}>
@@ -361,19 +362,19 @@ export default function App() {
               <PasswordStrength password={passF.password} />
             </Field>
 
-            <Field label="Confirmar senha">
-              <input type={showPass ? 'text' : 'password'} autoComplete="new-password" required placeholder="Repita a senha"
+            <Field label="Confirm password">
+              <input type={showPass ? 'text' : 'password'} autoComplete="new-password" required placeholder="Repeat the password"
                 value={passF.confirm}
                 onChange={e => setPassF(p => ({ ...p, confirm: e.target.value }))} />
             </Field>
 
             <Alert type="warning">
-              ⚠️ Sua senha é a <strong>única</strong> chave do cofre e <strong>não é salva em lugar nenhum</strong>. Se esquecê-la, as seeds não poderão ser recuperadas. Anote-a em local seguro.
+              ⚠️ Your password is the <strong>only</strong> key to the vault and is <strong>never stored anywhere</strong>. If you forget it, your seeds cannot be recovered. Write it down and keep it safe.
             </Alert>
             {error && <Alert type="error">{error}</Alert>}
 
             <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
-              {loading ? <><Spinner /> Gerando suas chaves…</> : <><Icon.Shield /> Criar cofre</>}
+              {loading ? <><Spinner /> Generating your keys…</> : <><Icon.Shield /> Create vault</>}
             </button>
           </form>
         </div>
@@ -382,7 +383,7 @@ export default function App() {
   }
 
   // ════════════════════════════════════════════════════════
-  // TELA: DESBLOQUEAR
+  // SCREEN: UNLOCK
   // ════════════════════════════════════════════════════════
   if (view === 'unlock') {
     return (
@@ -391,11 +392,11 @@ export default function App() {
           <div className="cv-brand">
             <img src="/logo.png" alt="SpaceOne" className="cv-brand-logo" />
             <h1 className="cv-brand-name">SpaceOne</h1>
-            <p className="cv-brand-sub">Cofre bloqueado. Digite sua senha para entrar.</p>
+            <p className="cv-brand-sub">Vault locked. Enter your password to continue.</p>
           </div>
 
           <form onSubmit={handleUnlock} className="cv-form" noValidate>
-            <Field label="Senha">
+            <Field label="Password">
               <div className="cv-input-wrap">
                 <input type={showPass ? 'text' : 'password'} autoComplete="current-password" required autoFocus placeholder="••••••••"
                   value={unlockPass}
@@ -410,7 +411,7 @@ export default function App() {
             {success && <Alert type="success">{success}</Alert>}
 
             <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
-              {loading ? <><Spinner /> Verificando…</> : <><Icon.Lock /> Desbloquear</>}
+              {loading ? <><Spinner /> Verifying…</> : <><Icon.Lock /> Unlock</>}
             </button>
           </form>
         </div>
@@ -419,7 +420,7 @@ export default function App() {
   }
 
   // ════════════════════════════════════════════════════════
-  // TELA: COFRE
+  // SCREEN: VAULT
   // ════════════════════════════════════════════════════════
   return (
     <div className="cv-dashboard">
@@ -429,27 +430,27 @@ export default function App() {
           <span className="cv-header-name">SpaceOne</span>
         </div>
         <div className="cv-header-right">
-          <span className="cv-header-email">100% local · nada sai do seu aparelho</span>
-          <button onClick={() => { setModal({ type: 'changepass' }); clearMsgs(); }} className="cv-btn-icon" title="Trocar senha"><Icon.Gear /></button>
-          <button onClick={() => { setModal({ type: 'backup' }); clearMsgs(); }} className="cv-btn cv-btn-ghost" style={{ padding: '8px 14px' }} title="Backup e transferência entre computadores">
+          <span className="cv-header-email">100% local · nothing leaves your device</span>
+          <button onClick={() => { setModal({ type: 'changepass' }); clearMsgs(); }} className="cv-btn-icon" title="Change password"><Icon.Gear /></button>
+          <button onClick={() => { setModal({ type: 'backup' }); clearMsgs(); }} className="cv-btn cv-btn-ghost" style={{ padding: '8px 14px' }} title="Backup & moving between computers">
             <Icon.Download /> Backup
           </button>
-          <button onClick={handleLock} className="cv-btn-icon cv-btn-icon--logout" title="Bloquear cofre"><Icon.LogOut /></button>
+          <button onClick={handleLock} className="cv-btn-icon cv-btn-icon--logout" title="Lock vault"><Icon.LogOut /></button>
         </div>
       </header>
 
       <main className="cv-main">
         <div className="cv-dash-top">
           <div>
-            <h2 className="cv-dash-title">Minhas Seeds</h2>
+            <h2 className="cv-dash-title">My Seeds</h2>
             <p className="cv-dash-sub">
               {loading && seeds.length === 0
-                ? 'Decifrando…'
-                : `${seeds.length} seed${seeds.length !== 1 ? 's' : ''} cifrada${seeds.length !== 1 ? 's' : ''} neste aparelho (AES-256)`}
+                ? 'Decrypting…'
+                : `${seeds.length} seed${seeds.length !== 1 ? 's' : ''} encrypted on this device (AES-256)`}
             </p>
           </div>
           <button onClick={() => { setModal({ type: 'add' }); clearMsgs(); }} className="cv-btn cv-btn-primary">
-            <Icon.Plus /> Nova Seed
+            <Icon.Plus /> New Seed
           </button>
         </div>
 
@@ -457,15 +458,15 @@ export default function App() {
         {success && <Alert type="success" className="cv-alert-float">{success}</Alert>}
 
         {loading && seeds.length === 0 && (
-          <div className="cv-state-center"><Spinner /><p>Decifrando suas seeds neste aparelho…</p></div>
+          <div className="cv-state-center"><Spinner /><p>Decrypting your seeds on this device…</p></div>
         )}
 
         {!loading && seeds.length === 0 && (
           <div className="cv-state-center cv-empty">
             <div className="cv-empty-icon"><Icon.Key /></div>
-            <h3>Nenhuma seed salva ainda</h3>
-            <p>Clique em <strong>Nova Seed</strong> para guardar sua primeira seed phrase. Tudo fica cifrado <strong>somente neste aparelho</strong>, protegido pela sua senha.</p>
-            <button onClick={() => setModal({ type: 'add' })} className="cv-btn cv-btn-primary"><Icon.Plus /> Salvar primeira seed</button>
+            <h3>No seeds saved yet</h3>
+            <p>Click <strong>New Seed</strong> to store your first seed phrase. Everything is encrypted <strong>on this device only</strong>, protected by your password.</p>
+            <button onClick={() => setModal({ type: 'add' })} className="cv-btn cv-btn-primary"><Icon.Plus /> Save first seed</button>
           </div>
         )}
 
@@ -487,7 +488,7 @@ export default function App() {
                     onClick={() => { setModal({ type: 'view', seed }); clearMsgs(); setShowSeed(false); setCopied(false); }}
                     className="cv-btn-view" disabled={seed.broken}
                   >
-                    <Icon.Eye /> Ver seed
+                    <Icon.Eye /> View seed
                   </button>
                 </div>
               </div>
@@ -496,13 +497,13 @@ export default function App() {
         )}
       </main>
 
-      {/* ── Modal: Adicionar Seed ── */}
+      {/* ── Modal: Add Seed ── */}
       {modal?.type === 'add' && (
         <Modal onClose={() => { setModal(null); clearMsgs(); setSeedF({ title: '', seedPhrase: '' }); setShowSeed(false); }}>
-          <div className="cv-modal-header"><h3><Icon.Key /> Nova Seed</h3></div>
+          <div className="cv-modal-header"><h3><Icon.Key /> New Seed</h3></div>
           <form onSubmit={handleSaveSeed}>
-            <Field label="Nome da carteira">
-              <input type="text" required maxLength={100} autoFocus placeholder="Ex: Bitcoin Fria, Ethereum Principal…"
+            <Field label="Wallet name">
+              <input type="text" required maxLength={100} autoFocus placeholder="E.g. Cold Bitcoin, Main Ethereum…"
                 autoComplete="off" spellCheck={false}
                 value={seedF.title}
                 onChange={e => setSeedF(p => ({ ...p, title: e.target.value }))} />
@@ -510,7 +511,7 @@ export default function App() {
 
             <Field label="Seed Phrase">
               <div className="cv-input-wrap cv-textarea-wrap">
-                <textarea required rows={4} className="cv-textarea" placeholder="Escreva ou cole suas palavras — ou gere 12 novas abaixo…"
+                <textarea required rows={4} className="cv-textarea" placeholder="Type or paste your words — or generate 12 new ones below…"
                   autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                   value={seedF.seedPhrase}
                   style={{ WebkitTextSecurity: showSeed ? 'none' : 'disc' }}
@@ -521,42 +522,42 @@ export default function App() {
               </div>
               {(() => {
                 const phrase = seedF.seedPhrase.trim().replace(/\s+/g, ' ');
-                if (!phrase) return <small className="cv-hint">🔒 Cifrada com AES-256 e guardada somente neste aparelho</small>;
+                if (!phrase) return <small className="cv-hint">🔒 Encrypted with AES-256 and stored only on this device</small>;
                 const n = phrase.split(' ').length;
                 const isBip = validateMnemonic(phrase.toLowerCase(), wordlist);
                 return (
                   <small className="cv-hint" style={{ color: isBip ? '#10b981' : undefined }}>
                     {isBip
-                      ? `✓ ${n} palavras — frase BIP39 válida (compatível com carteiras)`
-                      : `${n} palavra${n !== 1 ? 's' : ''} — frase personalizada · 🔒 cifrada com AES-256 somente neste aparelho`}
+                      ? `✓ ${n} words — valid BIP39 phrase (wallet compatible)`
+                      : `${n} word${n !== 1 ? 's' : ''} — custom phrase · 🔒 encrypted with AES-256 on this device only`}
                   </small>
                 );
               })()}
             </Field>
 
             <button type="button" onClick={handleGenerateSeed} className="cv-btn cv-btn-ghost" style={{ width: '100%', marginBottom: 14 }}>
-              <Icon.Dice /> Gerar 12 palavras para mim (BIP39)
+              <Icon.Dice /> Generate 12 words for me (BIP39)
             </button>
 
-            <Alert type="warning">⚠️ Certifique-se de estar em ambiente seguro e privado{seedF.seedPhrase ? '. Se gerou as palavras agora, anote-as em papel antes de salvar.' : ''}</Alert>
+            <Alert type="warning">⚠️ Make sure you are in a safe, private place{seedF.seedPhrase ? '. If you just generated these words, write them down on paper before saving.' : ''}</Alert>
             {error && <Alert type="error">{error}</Alert>}
 
             <div className="cv-modal-actions">
-              <button type="button" onClick={() => { setModal(null); clearMsgs(); setSeedF({ title: '', seedPhrase: '' }); setShowSeed(false); }} className="cv-btn cv-btn-ghost">Cancelar</button>
+              <button type="button" onClick={() => { setModal(null); clearMsgs(); setSeedF({ title: '', seedPhrase: '' }); setShowSeed(false); }} className="cv-btn cv-btn-ghost">Cancel</button>
               <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
-                {loading ? <><Spinner /> Cifrando…</> : <><Icon.Shield /> Salvar com segurança</>}
+                {loading ? <><Spinner /> Encrypting…</> : <><Icon.Shield /> Save securely</>}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
-      {/* ── Modal: Ver Seed ── */}
+      {/* ── Modal: View Seed ── */}
       {modal?.type === 'view' && (
         <Modal onClose={() => { setModal(null); clearMsgs(); setShowSeed(false); setCopied(false); setRevealPass(''); }}>
           <div className="cv-modal-header">
             <h3><Icon.Key /> {modal.seed.title}</h3>
-            <p className="cv-modal-date">Salva em {formatDate(modal.seed.timestamp)}</p>
+            <p className="cv-modal-date">Saved on {formatDate(modal.seed.timestamp)}</p>
           </div>
 
           <div className={`cv-seed-reveal ${showSeed ? 'is-visible' : 'is-hidden'}`}>
@@ -569,26 +570,26 @@ export default function App() {
             ) : (
               <div className="cv-seed-locked">
                 <div className="cv-locked-icon"><Icon.Lock /></div>
-                <p>Digite a senha do cofre para revelar</p>
-                <small>Certifique-se de que não há câmeras ou pessoas olhando</small>
+                <p>Enter your vault password to reveal</p>
+                <small>Make sure no cameras or people are watching</small>
               </div>
             )}
           </div>
 
           {!showSeed && (
             <form onSubmit={handleRevealSeed}>
-              <Field label="Senha do cofre">
+              <Field label="Vault password">
                 <input type="password" autoComplete="current-password" required autoFocus placeholder="••••••••"
                   value={revealPass}
                   onChange={e => setRevealPass(e.target.value)} />
               </Field>
               {error && <Alert type="error">{error}</Alert>}
               <div className="cv-modal-actions">
-                <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" title="Apagar seed">
-                  <Icon.Trash /> Apagar
+                <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" title="Delete seed">
+                  <Icon.Trash /> Delete
                 </button>
                 <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
-                  {loading ? <><Spinner /> Verificando…</> : <><Icon.Eye /> Revelar Seed</>}
+                  {loading ? <><Spinner /> Verifying…</> : <><Icon.Eye /> Reveal Seed</>}
                 </button>
               </div>
             </form>
@@ -596,17 +597,17 @@ export default function App() {
 
           {showSeed && (
             <>
-              <Alert type="warning">⚠️ Nunca compartilhe sua seed phrase. Não tire print desta tela.</Alert>
+              <Alert type="warning">⚠️ Never share your seed phrase. Do not screenshot this screen.</Alert>
               {success && <Alert type="success">{success}</Alert>}
               <div className="cv-modal-actions">
-                <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" title="Apagar seed">
-                  <Icon.Trash /> Apagar
+                <button type="button" onClick={() => handleDeleteSeed(modal.seed.id)} className="cv-btn cv-btn-danger" title="Delete seed">
+                  <Icon.Trash /> Delete
                 </button>
                 <button type="button" onClick={() => copyText(modal.seed.seedPhrase)} className={`cv-btn ${copied ? 'cv-btn-copied' : 'cv-btn-ghost'}`}>
-                  {copied ? <><Icon.Check /> Copiado!</> : <><Icon.Copy /> Copiar</>}
+                  {copied ? <><Icon.Check /> Copied!</> : <><Icon.Copy /> Copy</>}
                 </button>
                 <button type="button" onClick={() => { setShowSeed(false); setRevealPass(''); clearMsgs(); }} className="cv-btn cv-btn-primary">
-                  <Icon.EyeOff /> Ocultar
+                  <Icon.EyeOff /> Hide
                 </button>
               </div>
             </>
@@ -614,89 +615,89 @@ export default function App() {
         </Modal>
       )}
 
-      {/* ── Modal: Trocar senha ── */}
+      {/* ── Modal: Change password ── */}
       {modal?.type === 'changepass' && (
         <Modal onClose={() => { setModal(null); setChangeF({ current: '', password: '', confirm: '' }); clearMsgs(); }}>
-          <div className="cv-modal-header"><h3><Icon.Lock /> Trocar senha do cofre</h3></div>
+          <div className="cv-modal-header"><h3><Icon.Lock /> Change vault password</h3></div>
           <form onSubmit={handleChangePassword}>
-            <Field label="Senha atual">
+            <Field label="Current password">
               <input type="password" autoComplete="current-password" required autoFocus placeholder="••••••••"
                 value={changeF.current}
                 onChange={e => setChangeF(p => ({ ...p, current: e.target.value }))} />
             </Field>
-            <Field label="Nova senha">
-              <input type="password" autoComplete="new-password" required placeholder="Mínimo 8 caracteres"
+            <Field label="New password">
+              <input type="password" autoComplete="new-password" required placeholder="At least 8 characters"
                 value={changeF.password}
                 onChange={e => setChangeF(p => ({ ...p, password: e.target.value }))} />
               <PasswordStrength password={changeF.password} />
             </Field>
-            <Field label="Confirmar nova senha">
-              <input type="password" autoComplete="new-password" required placeholder="Repita a nova senha"
+            <Field label="Confirm new password">
+              <input type="password" autoComplete="new-password" required placeholder="Repeat the new password"
                 value={changeF.confirm}
                 onChange={e => setChangeF(p => ({ ...p, confirm: e.target.value }))} />
             </Field>
-            <Alert type="warning">⚠️ Backups antigos continuam abrindo com a senha usada quando foram exportados.</Alert>
+            <Alert type="warning">⚠️ Old backups still open with the password they were exported with.</Alert>
             {error && <Alert type="error">{error}</Alert>}
             <div className="cv-modal-actions">
-              <button type="button" onClick={() => { setModal(null); setChangeF({ current: '', password: '', confirm: '' }); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancelar</button>
+              <button type="button" onClick={() => { setModal(null); setChangeF({ current: '', password: '', confirm: '' }); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancel</button>
               <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
-                {loading ? <Spinner /> : <><Icon.Check /> Trocar senha</>}
+                {loading ? <Spinner /> : <><Icon.Check /> Change password</>}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
-      {/* ── Modal: Backup e transferência ── */}
+      {/* ── Modal: Backup & transfer ── */}
       {modal?.type === 'backup' && (
         <Modal onClose={() => { setModal(null); clearMsgs(); }}>
           <div className="cv-modal-header">
-            <h3><Icon.Download /> Backup e outro computador</h3>
-            <p className="cv-modal-date">Seu cofre vive só neste aparelho — o backup é como ele viaja</p>
+            <h3><Icon.Download /> Backup & other computers</h3>
+            <p className="cv-modal-date">Your vault lives only on this device — the backup is how it travels</p>
           </div>
 
           <div className="cv-seed-locked" style={{ textAlign: 'left', marginBottom: 16 }}>
-            <p style={{ marginBottom: 10 }}><strong>Para usar o SpaceOne em outro computador:</strong></p>
-            <p style={{ marginBottom: 6 }}>1. Clique em <strong>Exportar backup</strong> aqui — baixa um arquivo cifrado</p>
-            <p style={{ marginBottom: 6 }}>2. Leve o arquivo ao outro computador (pendrive, e-mail, nuvem…)</p>
-            <p style={{ marginBottom: 6 }}>3. Lá, abra o SpaceOne, crie uma senha e use <strong>Importar backup</strong></p>
-            <p style={{ marginBottom: 0 }}>4. Digite a senha que o cofre tinha quando exportou — pronto</p>
+            <p style={{ marginBottom: 10 }}><strong>To use SpaceOne on another computer:</strong></p>
+            <p style={{ marginBottom: 6 }}>1. Click <strong>Export backup</strong> here — it downloads an encrypted file</p>
+            <p style={{ marginBottom: 6 }}>2. Take the file to the other computer (USB drive, email, cloud…)</p>
+            <p style={{ marginBottom: 6 }}>3. There, open SpaceOne, create a password and use <strong>Import backup</strong></p>
+            <p style={{ marginBottom: 0 }}>4. Enter the password the vault had when you exported — done</p>
           </div>
 
-          <Alert type="warning">🔒 O arquivo de backup é cifrado: sem a senha, ele é inútil para quem o encontrar. Mesmo assim, guarde-o com cuidado. Ele também é o seu seguro se este computador quebrar ou o navegador for limpo.</Alert>
+          <Alert type="warning">🔒 The backup file is encrypted: without the password it is useless to whoever finds it. Still, keep it safe. It is also your insurance if this computer breaks or the browser data is cleared.</Alert>
           {error   && <Alert type="error">{error}</Alert>}
           {success && <Alert type="success">{success}</Alert>}
 
           <div className="cv-modal-actions">
             <label className="cv-btn cv-btn-ghost" style={{ cursor: 'pointer' }}>
-              <Icon.Upload /> Importar backup
+              <Icon.Upload /> Import backup
               <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={handleImportFile} />
             </label>
             <button type="button" onClick={handleExport} className="cv-btn cv-btn-primary">
-              <Icon.Download /> Exportar backup
+              <Icon.Download /> Export backup
             </button>
           </div>
         </Modal>
       )}
 
-      {/* ── Modal: Senha do backup importado ── */}
+      {/* ── Modal: Imported backup password ── */}
       {modal?.type === 'importpass' && (
         <Modal onClose={() => { setModal(null); setImportPass(''); clearMsgs(); }}>
           <div className="cv-modal-header">
-            <h3><Icon.Upload /> Importar backup</h3>
-            <p className="cv-modal-date">Digite a senha que o cofre tinha quando este backup foi exportado</p>
+            <h3><Icon.Upload /> Import backup</h3>
+            <p className="cv-modal-date">Enter the password the vault had when this backup was exported</p>
           </div>
           <form onSubmit={handleImportPass}>
-            <Field label="Senha do backup">
+            <Field label="Backup password">
               <input type="password" autoComplete="off" required autoFocus placeholder="••••••••"
                 value={importPass}
                 onChange={e => setImportPass(e.target.value)} />
             </Field>
             {error && <Alert type="error">{error}</Alert>}
             <div className="cv-modal-actions">
-              <button type="button" onClick={() => { setModal(null); setImportPass(''); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancelar</button>
+              <button type="button" onClick={() => { setModal(null); setImportPass(''); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancel</button>
               <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
-                {loading ? <Spinner /> : <><Icon.Check /> Importar</>}
+                {loading ? <Spinner /> : <><Icon.Check /> Import</>}
               </button>
             </div>
           </form>
@@ -706,7 +707,7 @@ export default function App() {
   );
 }
 
-// ── Componentes auxiliares ───────────────────────────────────
+// ── Helper components ────────────────────────────────────────
 function Field({ label, children }) {
   return <div className="cv-field"><label className="cv-label">{label}</label>{children}</div>;
 }
@@ -720,7 +721,7 @@ function Modal({ onClose, children }) {
   return (
     <div className="cv-overlay" onClick={onClose}>
       <div className="cv-modal" onClick={e => e.stopPropagation()}>
-        <button className="cv-modal-close" onClick={onClose} aria-label="Fechar">
+        <button className="cv-modal-close" onClick={onClose} aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
         {children}
@@ -731,13 +732,13 @@ function Modal({ onClose, children }) {
 
 function PasswordStrength({ password }) {
   const checks = [
-    { ok: password.length >= 8,   label: '8+ caracteres' },
-    { ok: /[A-Z]/.test(password), label: 'Maiúscula' },
-    { ok: /[0-9]/.test(password), label: 'Número' },
-    { ok: /[^A-Za-z0-9]/.test(password), label: 'Símbolo' },
+    { ok: password.length >= 8,   label: '8+ characters' },
+    { ok: /[A-Z]/.test(password), label: 'Uppercase' },
+    { ok: /[0-9]/.test(password), label: 'Number' },
+    { ok: /[^A-Za-z0-9]/.test(password), label: 'Symbol' },
   ];
   const score = checks.filter(c => c.ok).length;
-  const labels = ['', 'Fraca', 'Razoável', 'Boa', 'Forte'];
+  const labels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
   const colors = ['', '#ef4444', '#f59e0b', '#3b82f6', '#10b981'];
   return (
     <div className="cv-pwd-strength">
