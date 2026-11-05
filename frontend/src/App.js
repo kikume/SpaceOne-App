@@ -343,7 +343,7 @@ export default function App() {
       <div className="cv-bg">
         <div className="cv-card cv-card-auth">
           <div className="cv-brand">
-            <div className="cv-brand-icon"><Icon.Shield /></div>
+            <img src="/logo.png" alt="SpaceOne" className="cv-brand-logo" />
             <h1 className="cv-brand-name">SpaceOne</h1>
             <p className="cv-brand-sub">Crie a senha do seu cofre. Tudo fica só neste aparelho.</p>
           </div>
@@ -389,7 +389,7 @@ export default function App() {
       <div className="cv-bg">
         <div className="cv-card cv-card-auth">
           <div className="cv-brand">
-            <div className="cv-brand-icon"><Icon.Shield /></div>
+            <img src="/logo.png" alt="SpaceOne" className="cv-brand-logo" />
             <h1 className="cv-brand-name">SpaceOne</h1>
             <p className="cv-brand-sub">Cofre bloqueado. Digite sua senha para entrar.</p>
           </div>
@@ -425,7 +425,7 @@ export default function App() {
     <div className="cv-dashboard">
       <header className="cv-header">
         <div className="cv-header-brand">
-          <div className="cv-header-icon"><Icon.Shield /></div>
+          <img src="/logo.png" alt="" className="cv-header-logo" />
           <span className="cv-header-name">SpaceOne</span>
         </div>
         <div className="cv-header-right">
