@@ -101,8 +101,9 @@ body {
 /* ── Auth screens background ─────────────────────── */
 .cv-bg {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex; align-items: center; justify-content: center;
-  padding: 24px 16px;
+  padding: calc(24px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px));
   background:
     radial-gradient(ellipse 100% 60% at 50% -8%, rgba(242,193,78,.1) 0%, transparent 55%),
     radial-gradient(ellipse 55% 45% at 10% 100%, rgba(47,66,128,.18) 0%, transparent 55%),
@@ -349,7 +350,10 @@ body {
 /* ── Header ──────────────────────────────────────────────── */
 .cv-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 24px; height: 60px;
+  padding: 0 24px;
+  /* iOS standalone PWA: keep content below the status bar / notch */
+  padding-top: env(safe-area-inset-top, 0px);
+  height: calc(60px + env(safe-area-inset-top, 0px));
   background: rgba(10,15,31,.86);
   border-bottom: 1px solid var(--border-subtle);
   backdrop-filter: blur(24px) saturate(160%);
@@ -397,7 +401,7 @@ body {
 .cv-btn-icon:disabled { opacity: .3; cursor: not-allowed; }
 
 /* ── Main ────────────────────────────────────────────────── */
-.cv-main { flex: 1; max-width: 1000px; width: 100%; margin: 0 auto; padding: 36px 24px 100px; }
+.cv-main { flex: 1; max-width: 1000px; width: 100%; margin: 0 auto; padding: 36px 24px calc(100px + env(safe-area-inset-bottom, 0px)); }
 
 .cv-dash-top {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -495,7 +499,7 @@ body {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   display: flex; align-items: center; justify-content: center;
-  padding: 20px;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
   animation: cv-overlay-in .2s ease both;
 }
 @keyframes cv-overlay-in { from { opacity: 0; } to { opacity: 1; } }
