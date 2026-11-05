@@ -344,7 +344,7 @@ export default function App() {
       <div className="cv-bg">
         <div className="cv-card cv-card-auth">
           <div className="cv-brand">
-            <img src="/logo.png" alt="SpaceOne" className="cv-brand-logo" />
+            <img src="logo.png" alt="SpaceOne" className="cv-brand-logo" />
             <h1 className="cv-brand-name">SpaceOne</h1>
             <p className="cv-brand-sub">Create your vault password. Everything stays on this device.</p>
           </div>
@@ -390,7 +390,7 @@ export default function App() {
       <div className="cv-bg">
         <div className="cv-card cv-card-auth">
           <div className="cv-brand">
-            <img src="/logo.png" alt="SpaceOne" className="cv-brand-logo" />
+            <img src="logo.png" alt="SpaceOne" className="cv-brand-logo" />
             <h1 className="cv-brand-name">SpaceOne</h1>
             <p className="cv-brand-sub">Vault locked. Enter your password to continue.</p>
           </div>
@@ -426,7 +426,7 @@ export default function App() {
     <div className="cv-dashboard">
       <header className="cv-header">
         <div className="cv-header-brand">
-          <img src="/logo.png" alt="" className="cv-header-logo" />
+          <img src="logo.png" alt="" className="cv-header-logo" />
           <span className="cv-header-name">SpaceOne</span>
         </div>
         <div className="cv-header-right">
