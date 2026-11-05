@@ -37,7 +37,7 @@ self.addEventListener('fetch', e => {
   if (url.origin !== self.location.origin) return;
 
   // Static assets (/static/js, /static/css, icons, manifest) — cache-first (content-hashed)
-  if (url.pathname.startsWith('/static/') ||
+  if (url.pathname.includes('/static/') ||
       url.pathname.match(/\.(png|ico|json|webmanifest)$/)) {
     e.respondWith(
       caches.open(SHELL).then(cache =>
@@ -60,7 +60,11 @@ self.addEventListener('fetch', e => {
         return res;
       })
       .catch(() =>
-        caches.match(request).then(hit => hit || caches.match('/'))
+        caches.match(request).then(hit =>
+          hit ||
+          caches.match(self.registration.scope) ||
+          caches.match(self.registration.scope + 'index.html')
+        )
       )
   );
 });
