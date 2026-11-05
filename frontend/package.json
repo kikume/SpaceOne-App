@@ -1,13 +1,10 @@
 {
   "name": "spaceone",
   "version": "1.0.0",
-  "description": "SpaceOne — cofre local de seed phrases com criptografia de ponta a ponta",
+  "description": "SpaceOne — a local seed phrase vault with end-to-end encryption",
   "private": true,
   "homepage": "./",
   "dependencies": {
-    "@capacitor/android": "^8.4.0",
-    "@capacitor/core": "^8.4.0",
-    "@capgo/capacitor-native-biometric": "^8.4.10",
     "@noble/hashes": "^2.2.0",
     "@scure/bip39": "^2.4.0",
     "react": "^18.2.0",
@@ -34,8 +31,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "devDependencies": {
-    "@capacitor/cli": "^8.4.0"
   }
 }

@@ -1,32 +1,13 @@
-# Dependências
+# Dependencies
 node_modules/
 
-# Segredos / ambiente (NÃO versionar — contém JWT_SECRET e MASTER_PRIVATE_KEY)
+# Local environment
 .env
 .env.local
-backend/.env
-frontend/.env
-# (o .env.example é versionado de propósito, como template)
 
-# PostgreSQL portátil — só local, é pesado (~310MB) e específico da máquina
-pgsql/
-pgdata/
-pgsql.zip
-*.log
-
-# Builds
+# Build output
 build/
 dist/
-backend/public/
 
-# Toolchain Android portátil (enorme, específico da máquina — NÃO versionar)
-android-tools/
-
-# Capacitor / saídas de build nativo
-frontend/android/.gradle/
-frontend/android/build/
-frontend/android/app/build/
-frontend/android/capacitor-cordova-android-plugins/
-frontend/android/local.properties
-frontend/ios/App/Pods/
-frontend/ios/App/build/
+# Logs
+*.log
