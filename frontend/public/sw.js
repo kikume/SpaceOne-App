@@ -49,22 +49,25 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // HTML / navigation — network-first, fallback to cached index
+  // HTML / navigation — network-first; fall back to the cached app both
+  // when offline AND when the server answers an error (e.g. hosting down),
+  // so an installed app keeps opening from cache.
+  const cachedApp = () =>
+    caches.match(request).then(hit =>
+      hit ||
+      caches.match(self.registration.scope) ||
+      caches.match(self.registration.scope + 'index.html')
+    );
   e.respondWith(
     fetch(request)
       .then(res => {
         if (res.ok) {
           const clone = res.clone();
           caches.open(SHELL).then(c => c.put(request, clone));
+          return res;
         }
-        return res;
+        return cachedApp().then(hit => hit || res);
       })
-      .catch(() =>
-        caches.match(request).then(hit =>
-          hit ||
-          caches.match(self.registration.scope) ||
-          caches.match(self.registration.scope + 'index.html')
-        )
-      )
+      .catch(() => cachedApp())
   );
 });
