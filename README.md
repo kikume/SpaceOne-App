@@ -28,7 +28,7 @@ SpaceOne stores your crypto wallet seed phrases **on your own device only**. The
 
 ## Download
 
-Grab the ZIP from [`download/SpaceOne-v1.0.0.zip`](download/SpaceOne-v1.0.0.zip) (or the latest [Release](../../releases)), extract it and double-click **index.html**. That's it — no install, no server.
+Grab the ZIP from [`download/SpaceOne-v1.1.0.zip`](download/SpaceOne-v1.1.0.zip) (or the latest [Release](../../releases)), extract it and double-click **SpaceOne App.html**. That's it — no install, no server.
 
 ## Run from source
 

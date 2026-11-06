@@ -29,6 +29,7 @@ const Icon = {
   LogOut:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   Gear:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33h.01a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51h.01a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.01a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
   Dice:    () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1" fill="currentColor"/></svg>,
+  Pencil:  () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>,
 };
 
 function Spinner() {
@@ -66,6 +67,7 @@ export default function App() {
   const [changeF, setChangeF] = useState({ current: '', password: '', confirm: '' });
   const [importPass, setImportPass] = useState('');
   const [revealPass, setRevealPass] = useState('');
+  const [renameF, setRenameF] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [showSeed, setShowSeed] = useState(false);
   const [copied, setCopied]   = useState(false);
@@ -96,6 +98,23 @@ export default function App() {
     // eslint-disable-next-line
   }, [view, dek]);
 
+  // ── Auto-lock: lock the vault after inactivity (default 5 min) ──
+  useEffect(() => {
+    if (view !== 'vault' || !dek) return;
+    let timer;
+    let minutes = 5;
+    try {
+      const v = parseFloat(localStorage.getItem('spaceone_autolock_min'));
+      if (v > 0) minutes = v;
+    } catch {}
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => handleLock(), minutes * 60000); };
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(ev => window.addEventListener(ev, arm, { passive: true }));
+    arm();
+    return () => { clearTimeout(timer); events.forEach(ev => window.removeEventListener(ev, arm)); };
+    // eslint-disable-next-line
+  }, [view, dek]);
+
   async function copyText(text) {
     try {
       await navigator.clipboard.writeText(text);
@@ -114,10 +133,10 @@ export default function App() {
     }
   }
 
-  // ── Generate 12 words (BIP39, the wallet standard) ─────────
-  function handleGenerateSeed() {
+  // ── Generate 12 or 24 words (BIP39, the wallet standard) ───
+  function handleGenerateSeed(strength) {
     clearMsgs();
-    setSeedF(p => ({ ...p, seedPhrase: generateMnemonic(wordlist, 128) }));
+    setSeedF(p => ({ ...p, seedPhrase: generateMnemonic(wordlist, strength) }));
     setShowSeed(true); // show them so the user can write them down
   }
 
@@ -255,6 +274,32 @@ export default function App() {
     setModal(null);
     setShowSeed(false);
     showSuccess('Seed deleted from this device.');
+  }
+
+  // ── Rename a saved wallet (re-encrypts the blob with the new title) ──
+  async function handleRenameSeed(e) {
+    e.preventDefault();
+    clearMsgs();
+    const title = renameF.trim();
+    if (!title) return;
+    setLoading(true);
+    try {
+      const id = modal.seed.id;
+      const store = loadStore();
+      const idx = store.findIndex(i => i.id === id);
+      if (idx === -1) throw new Error('not found');
+      const data = await Vault.decryptSeed(dek, store[idx].blob);
+      store[idx] = { ...store[idx], blob: await Vault.encryptSeed(dek, title, data.seedPhrase) };
+      saveStore(store);
+      setSeeds(p => p.map(s => (s.id === id ? { ...s, title } : s)));
+      setModal(null);
+      setRenameF('');
+      showSuccess('Wallet renamed.');
+    } catch (err) {
+      setError('Could not rename: ' + (err.message || 'unknown error'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   // ── Backup: export the encrypted vault (opens only with the password) ──
@@ -535,9 +580,14 @@ export default function App() {
               })()}
             </Field>
 
-            <button type="button" onClick={handleGenerateSeed} className="cv-btn cv-btn-ghost" style={{ width: '100%', marginBottom: 14 }}>
-              <Icon.Dice /> Generate 12 words for me (BIP39)
-            </button>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+              <button type="button" onClick={() => handleGenerateSeed(128)} className="cv-btn cv-btn-ghost" style={{ flex: 1 }}>
+                <Icon.Dice /> Generate 12 words
+              </button>
+              <button type="button" onClick={() => handleGenerateSeed(256)} className="cv-btn cv-btn-ghost" style={{ flex: 1 }}>
+                <Icon.Dice /> Generate 24 words
+              </button>
+            </div>
 
             <Alert type="warning">⚠️ Make sure you are in a safe, private place{seedF.seedPhrase ? '. If you just generated these words, write them down on paper before saving.' : ''}</Alert>
             {error && <Alert type="error">{error}</Alert>}
@@ -556,7 +606,13 @@ export default function App() {
       {modal?.type === 'view' && (
         <Modal onClose={() => { setModal(null); clearMsgs(); setShowSeed(false); setCopied(false); setRevealPass(''); }}>
           <div className="cv-modal-header">
-            <h3><Icon.Key /> {modal.seed.title}</h3>
+            <h3>
+              <Icon.Key /> {modal.seed.title}
+              <button type="button" className="cv-btn-icon" title="Rename wallet" style={{ marginLeft: 4 }}
+                onClick={() => { setRenameF(modal.seed.title); setModal({ type: 'rename', seed: modal.seed }); clearMsgs(); setShowSeed(false); setRevealPass(''); }}>
+                <Icon.Pencil />
+              </button>
+            </h3>
             <p className="cv-modal-date">Saved on {formatDate(modal.seed.timestamp)}</p>
           </div>
 
@@ -612,6 +668,28 @@ export default function App() {
               </div>
             </>
           )}
+        </Modal>
+      )}
+
+      {/* ── Modal: Rename wallet ── */}
+      {modal?.type === 'rename' && (
+        <Modal onClose={() => { setModal(null); setRenameF(''); clearMsgs(); }}>
+          <div className="cv-modal-header"><h3><Icon.Pencil /> Rename wallet</h3></div>
+          <form onSubmit={handleRenameSeed}>
+            <Field label="Wallet name">
+              <input type="text" required maxLength={100} autoFocus
+                autoComplete="off" spellCheck={false}
+                value={renameF}
+                onChange={e => setRenameF(e.target.value)} />
+            </Field>
+            {error && <Alert type="error">{error}</Alert>}
+            <div className="cv-modal-actions">
+              <button type="button" onClick={() => { setModal(null); setRenameF(''); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancel</button>
+              <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                {loading ? <Spinner /> : <><Icon.Check /> Save name</>}
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
 
