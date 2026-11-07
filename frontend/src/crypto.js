@@ -92,6 +92,16 @@ async function decryptSeed(dek, blobB64) {
   return JSON.parse(textDec.decode(await aesDecrypt(dek, blobB64)));
 }
 
-const Vault = { createPasswordLock, openPasswordLock, encryptSeed, decryptSeed };
+/** Encrypts any JSON-serializable value with the DEK (e.g. the vault registry). */
+async function encryptData(dek, value) {
+  return aesEncrypt(dek, textEnc.encode(JSON.stringify(value)));
+}
+
+/** Decrypts a blob produced by encryptData. */
+async function decryptData(dek, blobB64) {
+  return JSON.parse(textDec.decode(await aesDecrypt(dek, blobB64)));
+}
+
+const Vault = { createPasswordLock, openPasswordLock, encryptSeed, decryptSeed, encryptData, decryptData };
 
 module.exports = Vault;

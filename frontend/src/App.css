@@ -400,6 +400,36 @@ body {
 .cv-btn-icon--logout:hover { color: var(--red); background: var(--red-dim); }
 .cv-btn-icon:disabled { opacity: .3; cursor: not-allowed; }
 
+/* ── Vault pills ─────────────────────────────────────────── */
+.cv-vaults {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.cv-vault-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 14px;
+  color: var(--text-2);
+  font-family: var(--font-sans); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all var(--t-base);
+  letter-spacing: -.01em;
+}
+.cv-vault-pill svg { width: 13px; height: 13px; }
+.cv-vault-pill:hover { border-color: var(--border-hi); color: var(--text); }
+.cv-vault-pill.is-active {
+  background: var(--gold-dim);
+  border-color: var(--gold-mid);
+  color: var(--gold);
+}
+.cv-vault-pill.is-active:hover { border-color: var(--gold); }
+.cv-vault-gear { display: inline-flex; opacity: .65; margin-left: 2px; }
+.cv-vault-gear svg { width: 12px; height: 12px; }
+.cv-vault-pill--new { border-style: dashed; color: var(--text-3); }
+.cv-vault-pill--new:hover { color: var(--gold); border-color: var(--gold-mid); }
+
 /* ── Main ────────────────────────────────────────────────── */
 .cv-main { flex: 1; max-width: 1000px; width: 100%; margin: 0 auto; padding: 36px 24px calc(100px + env(safe-area-inset-bottom, 0px)); }
 

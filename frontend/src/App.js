@@ -37,9 +37,12 @@ function Spinner() {
 }
 
 // ── Local storage ────────────────────────────────────────────
-const STORE_KEY   = 'spaceone_vault_v1';  // encrypted seeds
+const STORE_KEY   = 'spaceone_vault_v1';  // encrypted seeds (each item carries its vault id)
 const AUTH_KEY    = 'spaceone_auth_v2';   // { kdfSalt, wrappedDek } — the password itself is never stored
 const LEGACY_DEK  = 'spaceone_dek_v1';    // old passwordless version — migrated during setup
+const VAULTS_KEY  = 'spaceone_vaults_v1'; // vault registry, encrypted with the DEK
+const ACTIVE_KEY  = 'spaceone_active_vault'; // last active vault id (non-sensitive)
+const MAIN_VAULT  = 'main';
 
 function b64dec(str) { const s = atob(str); const a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
 
@@ -68,6 +71,9 @@ export default function App() {
   const [importPass, setImportPass] = useState('');
   const [revealPass, setRevealPass] = useState('');
   const [renameF, setRenameF] = useState('');
+  const [vaults, setVaults] = useState([]);          // [{id, name}] — decrypted registry, memory only
+  const [activeVault, setActiveVault] = useState(MAIN_VAULT);
+  const [vaultF, setVaultF] = useState('');          // name field for new/rename vault modals
   const [showPass, setShowPass] = useState(false);
   const [showSeed, setShowSeed] = useState(false);
   const [copied, setCopied]   = useState(false);
@@ -78,18 +84,38 @@ export default function App() {
     setTimeout(() => setSuccess(''), ms);
   }
 
-  // ── With the vault open, decrypt the stored seeds ──────────
+  // ── With the vault open: load the vault registry, then the seeds ──
   useEffect(() => {
     if (view !== 'vault' || !dek) return;
     (async () => {
       setLoading(true);
+      // Vault registry: decrypt it, or create the default one (migration:
+      // existing users get a "Main Vault" holding everything they had).
+      let registry = null;
+      try {
+        const blob = localStorage.getItem(VAULTS_KEY);
+        if (blob) registry = await Vault.decryptData(dek, blob);
+      } catch {}
+      if (!Array.isArray(registry) || registry.length === 0) {
+        registry = [{ id: MAIN_VAULT, name: 'Main Vault', createdAt: new Date().toISOString() }];
+        try { localStorage.setItem(VAULTS_KEY, await Vault.encryptData(dek, registry)); } catch {}
+      }
+      setVaults(registry);
+      let active = MAIN_VAULT;
+      try {
+        const saved = localStorage.getItem(ACTIVE_KEY);
+        if (saved && registry.some(v => v.id === saved)) active = saved;
+        else active = registry[0].id;
+      } catch { active = registry[0].id; }
+      setActiveVault(active);
+
       const out = [];
       for (const item of loadStore()) {
         try {
           const data = await Vault.decryptSeed(dek, item.blob);
-          out.push({ id: item.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: item.createdAt });
+          out.push({ id: item.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: item.createdAt, vault: item.vault || MAIN_VAULT });
         } catch {
-          out.push({ id: item.id, title: '(could not decrypt)', seedPhrase: '', timestamp: item.createdAt, broken: true });
+          out.push({ id: item.id, title: '(could not decrypt)', seedPhrase: '', timestamp: item.createdAt, vault: item.vault || MAIN_VAULT, broken: true });
         }
       }
       setSeeds(out);
@@ -97,6 +123,17 @@ export default function App() {
     })();
     // eslint-disable-next-line
   }, [view, dek]);
+
+  async function saveVaultRegistry(list) {
+    setVaults(list);
+    try { localStorage.setItem(VAULTS_KEY, await Vault.encryptData(dek, list)); } catch {}
+  }
+
+  function switchVault(id) {
+    setActiveVault(id);
+    try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
+    clearMsgs();
+  }
 
   // ── Auto-lock: lock the vault after inactivity (default 5 min) ──
   useEffect(() => {
@@ -192,11 +229,74 @@ export default function App() {
   function handleLock() {
     setDek(null);
     setSeeds([]);
+    setVaults([]);
     setModal(null);
     setSeedF({ title: '', seedPhrase: '' });
     setShowSeed(false);
     clearMsgs();
     setView('unlock');
+  }
+
+  // ── Create / rename / delete vaults ─────────────────────────
+  async function handleCreateVault(e) {
+    e.preventDefault();
+    clearMsgs();
+    const name = vaultF.trim();
+    if (!name) return;
+    if (vaults.some(v => v.name.toLowerCase() === name.toLowerCase())) { setError('A vault with that name already exists.'); return; }
+    setLoading(true);
+    try {
+      const v = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, createdAt: new Date().toISOString() };
+      await saveVaultRegistry([...vaults, v]);
+      switchVault(v.id);
+      setModal(null);
+      setVaultF('');
+      showSuccess(`Vault "${name}" created.`);
+    } catch (err) {
+      setError('Could not create the vault: ' + (err.message || 'unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRenameVault(e) {
+    e.preventDefault();
+    clearMsgs();
+    const name = vaultF.trim();
+    if (!name) return;
+    setLoading(true);
+    try {
+      await saveVaultRegistry(vaults.map(v => (v.id === activeVault ? { ...v, name } : v)));
+      setModal(null);
+      setVaultF('');
+      showSuccess('Vault renamed.');
+    } catch (err) {
+      setError('Could not rename the vault: ' + (err.message || 'unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeleteVault() {
+    clearMsgs();
+    if (vaults.length <= 1) { setError('You cannot delete your only vault.'); return; }
+    const v = vaults.find(x => x.id === activeVault);
+    const count = seeds.filter(s => (s.vault || MAIN_VAULT) === activeVault).length;
+    if (!window.confirm(`Delete the vault "${v?.name}" and the ${count} seed${count !== 1 ? 's' : ''} inside it? This cannot be undone.`)) return;
+    setLoading(true);
+    try {
+      saveStore(loadStore().filter(i => (i.vault || MAIN_VAULT) !== activeVault));
+      setSeeds(p => p.filter(s => (s.vault || MAIN_VAULT) !== activeVault));
+      const rest = vaults.filter(x => x.id !== activeVault);
+      await saveVaultRegistry(rest);
+      switchVault(rest[0].id);
+      setModal(null);
+      showSuccess('Vault deleted from this device.');
+    } catch (err) {
+      setError('Could not delete the vault: ' + (err.message || 'unknown error'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   // ── Change the password ─────────────────────────────────────
@@ -250,11 +350,11 @@ export default function App() {
     setLoading(true);
     try {
       const blob = await Vault.encryptSeed(dek, title, phrase);
-      const item = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), blob, createdAt: new Date().toISOString() };
+      const item = { id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), blob, createdAt: new Date().toISOString(), vault: activeVault };
       const store = loadStore();
       store.unshift(item);
       saveStore(store);
-      setSeeds(p => [{ id: item.id, title, seedPhrase: phrase, timestamp: item.createdAt }, ...p]);
+      setSeeds(p => [{ id: item.id, title, seedPhrase: phrase, timestamp: item.createdAt, vault: activeVault }, ...p]);
       setModal(null);
       setSeedF({ title: '', seedPhrase: '' });
       setShowSeed(false);
@@ -302,14 +402,15 @@ export default function App() {
     }
   }
 
-  // ── Backup: export the encrypted vault (opens only with the password) ──
+  // ── Backup: export every vault, encrypted (opens only with the password) ──
   function handleExport() {
     clearMsgs();
     const auth = loadAuth();
     const payload = {
-      app: 'SpaceOne', version: 2, exportedAt: new Date().toISOString(),
+      app: 'SpaceOne', version: 3, exportedAt: new Date().toISOString(),
       kdfSalt: auth.kdfSalt, wrappedDek: auth.wrappedDek,
-      items: loadStore(),
+      vaults: (() => { try { return localStorage.getItem(VAULTS_KEY) || null; } catch { return null; } })(),
+      items: loadStore().map(i => ({ ...i, vault: i.vault || MAIN_VAULT })),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -331,7 +432,7 @@ export default function App() {
       if (payload.version === 1 && payload.dek) {
         // legacy passwordless backup: the key travels inside the file
         doImport(payload, b64dec(payload.dek));
-      } else if (payload.version === 2 && payload.kdfSalt && payload.wrappedDek) {
+      } else if ((payload.version === 2 || payload.version === 3) && payload.kdfSalt && payload.wrappedDek) {
         setModal({ type: 'importpass', payload });
       } else {
         throw new Error('invalid');
@@ -359,15 +460,30 @@ export default function App() {
   async function doImport(payload, importDek) {
     setLoading(true);
     try {
+      // v3 backups carry a vault registry: merge any vault we don't have yet.
+      let registry = vaults;
+      let importedVaults = null;
+      if (payload.version === 3 && payload.vaults) {
+        try { importedVaults = await Vault.decryptData(importDek, payload.vaults); } catch {}
+      }
+      if (Array.isArray(importedVaults)) {
+        const missing = importedVaults.filter(iv => !registry.some(v => v.id === iv.id));
+        if (missing.length) {
+          registry = [...registry, ...missing];
+          await saveVaultRegistry(registry);
+        }
+      }
+      const fallbackVault = registry.some(v => v.id === MAIN_VAULT) ? MAIN_VAULT : registry[0].id;
       const store = loadStore();
       const added = [];
       for (const item of payload.items) {
         if (store.some(i => i.id === item.id)) continue;
         const data = await Vault.decryptSeed(importDek, item.blob);              // open with the backup's key
         const blob = await Vault.encryptSeed(dek, data.title, data.seedPhrase); // re-encrypt with this vault's key
-        const newItem = { id: item.id, blob, createdAt: item.createdAt };
+        const vaultId = item.vault && registry.some(v => v.id === item.vault) ? item.vault : fallbackVault;
+        const newItem = { id: item.id, blob, createdAt: item.createdAt, vault: vaultId };
         store.push(newItem);
-        added.push({ id: newItem.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: newItem.createdAt });
+        added.push({ id: newItem.id, title: data.title, seedPhrase: data.seedPhrase, timestamp: newItem.createdAt, vault: vaultId });
       }
       saveStore(store);
       if (added.length) setSeeds(p => [...added, ...p]);
@@ -485,13 +601,31 @@ export default function App() {
       </header>
 
       <main className="cv-main">
+        <div className="cv-vaults">
+          {vaults.map(v => (
+            <button key={v.id}
+              className={`cv-vault-pill${v.id === activeVault ? ' is-active' : ''}`}
+              onClick={() => (v.id === activeVault
+                ? (() => { setVaultF(v.name); setModal({ type: 'managevault' }); clearMsgs(); })()
+                : switchVault(v.id))}
+              title={v.id === activeVault ? 'Manage this vault' : `Switch to ${v.name}`}>
+              <Icon.Shield /> {v.name}
+              {v.id === activeVault && <span className="cv-vault-gear"><Icon.Gear /></span>}
+            </button>
+          ))}
+          <button className="cv-vault-pill cv-vault-pill--new" title="New vault"
+            onClick={() => { setVaultF(''); setModal({ type: 'newvault' }); clearMsgs(); }}>
+            <Icon.Plus /> New vault
+          </button>
+        </div>
+
         <div className="cv-dash-top">
           <div>
-            <h2 className="cv-dash-title">My Seeds</h2>
+            <h2 className="cv-dash-title">{vaults.find(v => v.id === activeVault)?.name || 'My Seeds'}</h2>
             <p className="cv-dash-sub">
               {loading && seeds.length === 0
                 ? 'Decrypting…'
-                : `${seeds.length} seed${seeds.length !== 1 ? 's' : ''} encrypted on this device (AES-256)`}
+                : (() => { const n = seeds.filter(s => (s.vault || MAIN_VAULT) === activeVault).length; return `${n} seed${n !== 1 ? 's' : ''} encrypted on this device (AES-256)`; })()}
             </p>
           </div>
           <button onClick={() => { setModal({ type: 'add' }); clearMsgs(); }} className="cv-btn cv-btn-primary">
@@ -506,18 +640,18 @@ export default function App() {
           <div className="cv-state-center"><Spinner /><p>Decrypting your seeds on this device…</p></div>
         )}
 
-        {!loading && seeds.length === 0 && (
+        {!loading && seeds.filter(s => (s.vault || MAIN_VAULT) === activeVault).length === 0 && (
           <div className="cv-state-center cv-empty">
             <div className="cv-empty-icon"><Icon.Key /></div>
-            <h3>No seeds saved yet</h3>
-            <p>Click <strong>New Seed</strong> to store your first seed phrase. Everything is encrypted <strong>on this device only</strong>, protected by your password.</p>
+            <h3>No seeds in this vault yet</h3>
+            <p>Click <strong>New Seed</strong> to store a seed phrase here. Everything is encrypted <strong>on this device only</strong>, protected by your password.</p>
             <button onClick={() => setModal({ type: 'add' })} className="cv-btn cv-btn-primary"><Icon.Plus /> Save first seed</button>
           </div>
         )}
 
-        {seeds.length > 0 && (
+        {seeds.filter(s => (s.vault || MAIN_VAULT) === activeVault).length > 0 && (
           <div className="cv-grid">
-            {seeds.map((seed) => (
+            {seeds.filter(s => (s.vault || MAIN_VAULT) === activeVault).map((seed) => (
               <div key={seed.id} className="cv-seed-card">
                 <div className="cv-sc-header">
                   <div className="cv-sc-icon"><Icon.Key /></div>
@@ -668,6 +802,60 @@ export default function App() {
               </div>
             </>
           )}
+        </Modal>
+      )}
+
+      {/* ── Modal: New vault ── */}
+      {modal?.type === 'newvault' && (
+        <Modal onClose={() => { setModal(null); setVaultF(''); clearMsgs(); }}>
+          <div className="cv-modal-header">
+            <h3><Icon.Shield /> New vault</h3>
+            <p className="cv-modal-date">A separate room inside your SpaceOne — same password, its own seeds</p>
+          </div>
+          <form onSubmit={handleCreateVault}>
+            <Field label="Vault name">
+              <input type="text" required maxLength={40} autoFocus placeholder="E.g. Business, Family, Cold storage…"
+                autoComplete="off" spellCheck={false}
+                value={vaultF}
+                onChange={e => setVaultF(e.target.value)} />
+            </Field>
+            {error && <Alert type="error">{error}</Alert>}
+            <div className="cv-modal-actions">
+              <button type="button" onClick={() => { setModal(null); setVaultF(''); clearMsgs(); }} className="cv-btn cv-btn-ghost">Cancel</button>
+              <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                {loading ? <Spinner /> : <><Icon.Plus /> Create vault</>}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── Modal: Manage active vault (rename / delete) ── */}
+      {modal?.type === 'managevault' && (
+        <Modal onClose={() => { setModal(null); setVaultF(''); clearMsgs(); }}>
+          <div className="cv-modal-header">
+            <h3><Icon.Gear /> Manage vault</h3>
+            <p className="cv-modal-date">Rename this vault, or delete it and everything inside</p>
+          </div>
+          <form onSubmit={handleRenameVault}>
+            <Field label="Vault name">
+              <input type="text" required maxLength={40} autoFocus
+                autoComplete="off" spellCheck={false}
+                value={vaultF}
+                onChange={e => setVaultF(e.target.value)} />
+            </Field>
+            {error && <Alert type="error">{error}</Alert>}
+            {success && <Alert type="success">{success}</Alert>}
+            <div className="cv-modal-actions">
+              <button type="button" onClick={handleDeleteVault} className="cv-btn cv-btn-danger" disabled={loading || vaults.length <= 1}
+                title={vaults.length <= 1 ? 'You cannot delete your only vault' : 'Delete this vault and its seeds'}>
+                <Icon.Trash /> Delete vault
+              </button>
+              <button type="submit" className="cv-btn cv-btn-primary" disabled={loading}>
+                {loading ? <Spinner /> : <><Icon.Check /> Save name</>}
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
 
